@@ -1,0 +1,12 @@
+[package]
+name = "apitest-interop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+apitest-core = { path = "../apitest-core" }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true

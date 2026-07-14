@@ -1,0 +1,60 @@
+[workspace]
+members = [
+    "crates/apitest-app",
+    "crates/apitest-core",
+    "crates/apitest-interop",
+    "crates/apitest-runtime",
+    "crates/apitest-storage",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+authors = ["zzhtl"]
+repository = "https://github.com/zzhtl/apitest"
+
+[workspace.dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+async-stream = "0.3"
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+bytes = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6.0"
+eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
+egui = "0.35"
+egui_extras = "0.35"
+eventsource-stream = "0.2"
+futures = "0.3"
+http = "1.3"
+indexmap = { version = "2.11", features = ["serde"] }
+keyring = "4.1"
+rusqlite = { version = "0.40", features = ["backup", "bundled", "chrono", "serde_json"] }
+reqwest = { version = "0.13", default-features = false, features = ["brotli", "cookies", "deflate", "form", "gzip", "http2", "json", "multipart", "query", "rustls", "socks", "stream", "system-proxy", "zstd"] }
+rquickjs = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots", "url"] }
+tonic = { version = "0.14", features = ["tls-native-roots"] }
+tonic-reflection = { version = "0.14", default-features = false }
+prost = "0.14"
+prost-reflect = { version = "0.16", features = ["serde", "text-format"] }
+prost-types = "0.14"
+protox = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1.18", features = ["serde", "v7"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

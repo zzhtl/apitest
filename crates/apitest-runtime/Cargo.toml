@@ -1,0 +1,38 @@
+[package]
+name = "apitest-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+apitest-core = { path = "../apitest-core" }
+apitest-storage = { path = "../apitest-storage" }
+async-stream.workspace = true
+axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+eventsource-stream.workspace = true
+futures.workspace = true
+http.workspace = true
+indexmap.workspace = true
+prost.workspace = true
+prost-reflect.workspace = true
+prost-types.workspace = true
+protox.workspace = true
+reqwest.workspace = true
+rquickjs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tonic-reflection.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27"
