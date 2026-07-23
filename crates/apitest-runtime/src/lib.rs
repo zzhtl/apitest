@@ -3,6 +3,7 @@
 mod grpc;
 mod http;
 mod mock;
+mod registry;
 mod scenario;
 mod script;
 mod websocket;
@@ -12,8 +13,10 @@ pub use grpc::{
 };
 pub use http::HttpExecutor;
 pub use mock::{MockRoute, MockServer, MockServerError};
+pub use registry::ExecutorRegistry;
 pub use scenario::{
-    Scenario, ScenarioError, ScenarioReport, ScenarioRunner, ScenarioStep, StepReport,
+    ResponseSchemaContract, Scenario, ScenarioCase, ScenarioError, ScenarioReport, ScenarioRunner,
+    ScenarioStep, StepReport,
 };
 pub use script::{ScriptAssertion, ScriptEngine, ScriptError, ScriptResponse, ScriptResult};
 pub use websocket::{WebSocketExecutor, WebSocketSession};

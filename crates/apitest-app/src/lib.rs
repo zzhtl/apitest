@@ -1,9 +1,16 @@
 mod app;
 mod draft;
+mod environment;
+mod persistence;
 mod theme;
+mod workbench;
 
 pub use app::ApiTestApp;
-pub use draft::{BodyMode, EditablePair, RequestDraft};
+pub use draft::{
+    AuthDraft, AuthMode, BodyMode, EditableMultipartPart, EditablePair, MultipartValueMode,
+    ProxyDraft, RequestDraft, SecretDraft,
+};
+pub use workbench::{AutoSaveState, DocumentId, DocumentKind, DocumentTab, DocumentTabs};
 
 use eframe::egui;
 

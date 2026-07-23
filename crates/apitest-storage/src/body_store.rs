@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 use crate::StorageError;
 
+const REDACTED: &[u8] = b"[REDACTED]";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BodyRef {
     pub path: PathBuf,
@@ -45,6 +47,27 @@ impl BodyStore {
             final_path,
             size: 0,
             committed: false,
+        })
+    }
+
+    pub fn begin_redacted<I, S>(&self, secrets: I) -> Result<RedactingBodySink, StorageError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<[u8]>,
+    {
+        let mut secrets = secrets
+            .into_iter()
+            .map(|secret| secret.as_ref().to_vec())
+            .filter(|secret| !secret.is_empty())
+            .collect::<Vec<_>>();
+        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+        secrets.dedup();
+        let max_secret_len = secrets.iter().map(Vec::len).max().unwrap_or(1);
+        Ok(RedactingBodySink {
+            sink: Some(self.begin()?),
+            secrets,
+            max_secret_len,
+            pending: Vec::new(),
         })
     }
 
@@ -133,5 +156,75 @@ impl Drop for BodySink {
         if !self.committed {
             let _ = fs::remove_file(&self.temporary_path);
         }
+    }
+}
+
+pub struct RedactingBodySink {
+    sink: Option<BodySink>,
+    secrets: Vec<Vec<u8>>,
+    max_secret_len: usize,
+    pending: Vec<u8>,
+}
+
+impl RedactingBodySink {
+    pub fn commit(mut self) -> Result<BodyRef, StorageError> {
+        let path = self
+            .sink
+            .as_ref()
+            .expect("redacting body sink should be open")
+            .temporary_path()
+            .to_path_buf();
+        self.drain_pending(true)
+            .map_err(|error| StorageError::io(&path, error))?;
+        self.sink
+            .take()
+            .expect("redacting body sink should be open")
+            .commit()
+    }
+
+    fn drain_pending(&mut self, final_chunk: bool) -> std::io::Result<()> {
+        let safe_end = if final_chunk {
+            self.pending.len()
+        } else {
+            self.pending
+                .len()
+                .saturating_sub(self.max_secret_len.saturating_sub(1))
+        };
+        let mut cursor = 0;
+        let sink = self
+            .sink
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("body sink is already committed"))?;
+        while cursor < safe_end {
+            if let Some(secret) = self
+                .secrets
+                .iter()
+                .find(|secret| self.pending[cursor..].starts_with(secret))
+            {
+                sink.write_all(REDACTED)?;
+                cursor += secret.len();
+            } else {
+                sink.write_all(&self.pending[cursor..cursor + 1])?;
+                cursor += 1;
+            }
+        }
+        self.pending.drain(..cursor);
+        Ok(())
+    }
+}
+
+impl Write for RedactingBodySink {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.pending.extend_from_slice(buffer);
+        self.drain_pending(false)?;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.drain_pending(false)?;
+        self.sink
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("body sink is already committed"))?
+            .flush()
     }
 }

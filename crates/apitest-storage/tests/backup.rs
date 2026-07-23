@@ -29,3 +29,22 @@ fn creates_consistent_backups_and_enforces_retention() {
         "Before backup"
     );
 }
+
+#[test]
+fn archives_an_existing_database_before_opening_a_new_schema() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let source_path = temp.path().join("apitest.sqlite3");
+    let archive_path = temp.path().join("legacy-v1.sqlite3");
+    let source = Database::open(&source_path).expect("source should open");
+    source
+        .save_project(&Project::new("Legacy project"))
+        .expect("project should save");
+
+    Database::backup_file(&source_path, &archive_path).expect("legacy database should archive");
+
+    let archive = Database::open(&archive_path).expect("archive should open");
+    assert_eq!(
+        archive.list_projects().expect("projects should load")[0].name,
+        "Legacy project"
+    );
+}

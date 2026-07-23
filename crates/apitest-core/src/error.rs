@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::ProtocolKind;
+
 /// Errors raised while manipulating ApiTest domain data.
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -22,6 +24,8 @@ pub enum ExecutionError {
     Timeout { timeout_ms: u64 },
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    #[error("no executor is registered for {0:?}")]
+    UnsupportedProtocol(ProtocolKind),
     #[error("authentication failed: {0}")]
     Authentication(String),
     #[error("network failure: {0}")]

@@ -143,11 +143,17 @@ pub struct HttpSpec {
     pub url: String,
     pub query: Vec<KeyValue>,
     pub headers: Vec<KeyValue>,
+    #[serde(default)]
+    pub cookies: Vec<KeyValue>,
     pub body: BodySpec,
     pub auth: AuthSpec,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub validate_tls: bool,
+    #[serde(default)]
+    pub proxy: Option<HttpProxy>,
+    #[serde(default)]
+    pub client_certificate: Option<ClientCertificate>,
 }
 
 impl HttpSpec {
@@ -157,13 +163,28 @@ impl HttpSpec {
             url: url.into(),
             query: Vec::new(),
             headers: Vec::new(),
+            cookies: Vec::new(),
             body: BodySpec::None,
             auth: AuthSpec::None,
             timeout_ms: Duration::from_secs(30).as_millis() as u64,
             follow_redirects: true,
             validate_tls: true,
+            proxy: None,
+            client_certificate: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HttpProxy {
+    pub url: String,
+    pub username: Option<String>,
+    pub password: Option<SecretRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientCertificate {
+    pub pem_file: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +278,12 @@ pub enum AuthSpec {
         client_id: String,
         client_secret: Option<SecretRef>,
         scopes: Vec<String>,
+        #[serde(default)]
+        username: Option<String>,
+        #[serde(default)]
+        password: Option<SecretRef>,
+        #[serde(default)]
+        access_token: Option<SecretRef>,
     },
     Digest {
         username: String,

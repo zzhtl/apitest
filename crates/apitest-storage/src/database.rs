@@ -5,13 +5,38 @@ use std::{
     time::Duration,
 };
 
-use apitest_core::{ApiDefinition, EntityId, Environment, Project, ProtocolKind};
+use apitest_core::{
+    ApiDefinition, EntityId, Environment, MockProfile, Project, ProjectNode, ProjectNodeKind,
+    ProtocolKind, RequestCase, RunRecord, TestScenario,
+};
+use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::StorageError;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageRequest {
+    pub offset: usize,
+    pub limit: usize,
+}
+
+impl PageRequest {
+    pub fn new(offset: usize, limit: usize) -> Self {
+        Self {
+            offset,
+            limit: limit.clamp(1, 500),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub total: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefinitionSummary {
@@ -26,6 +51,22 @@ pub struct Database {
 }
 
 impl Database {
+    pub fn backup_file(
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+    ) -> Result<(), StorageError> {
+        let source_path = source.as_ref();
+        let destination = destination.as_ref();
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| StorageError::io(parent, error))?;
+        }
+        let source = Connection::open(source_path)?;
+        let mut target = Connection::open(destination)?;
+        let backup = rusqlite::backup::Backup::new(&source, &mut target)?;
+        backup.run_to_completion(128, Duration::from_millis(5), None)?;
+        Ok(())
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
@@ -100,10 +141,42 @@ impl Database {
              CREATE TABLE IF NOT EXISTS request_cases (
                  id TEXT PRIMARY KEY,
                  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                 definition_id TEXT NOT NULL,
+                 definition_id TEXT NOT NULL REFERENCES definitions(id) ON DELETE CASCADE,
                  name TEXT NOT NULL,
                  document TEXT NOT NULL
              );
+             CREATE INDEX IF NOT EXISTS request_cases_definition_idx
+                 ON request_cases(project_id, definition_id, name);
+             CREATE TABLE IF NOT EXISTS project_nodes (
+                 id TEXT PRIMARY KEY,
+                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 parent_id TEXT,
+                 entity_id TEXT,
+                 kind TEXT NOT NULL,
+                 name TEXT NOT NULL,
+                 sort_order INTEGER NOT NULL,
+                 document TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS project_nodes_parent_idx
+                 ON project_nodes(project_id, parent_id, sort_order, name);
+             CREATE INDEX IF NOT EXISTS project_nodes_entity_idx
+                 ON project_nodes(project_id, entity_id, kind);
+             CREATE TABLE IF NOT EXISTS scenarios (
+                 id TEXT PRIMARY KEY,
+                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name TEXT NOT NULL,
+                 document TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS scenarios_project_idx
+                 ON scenarios(project_id, name);
+             CREATE TABLE IF NOT EXISTS mock_profiles (
+                 id TEXT PRIMARY KEY,
+                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name TEXT NOT NULL,
+                 document TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS mock_profiles_project_idx
+                 ON mock_profiles(project_id, name);
              CREATE TABLE IF NOT EXISTS run_records (
                  id TEXT PRIMARY KEY,
                  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -200,7 +273,7 @@ impl Database {
                 definition.id.to_string(),
                 project_id.to_string(),
                 definition.name,
-                protocol_name(definition.protocol.kind()),
+                protocol_name(definition.contract.kind()),
                 definition.updated_at.to_rfc3339(),
                 document
             ],
@@ -219,6 +292,69 @@ impl Database {
                 definition.description_markdown
             ],
         )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn save_definition_and_case(
+        &self,
+        project_id: EntityId,
+        definition: &ApiDefinition,
+        request_case: &RequestCase,
+    ) -> Result<(), StorageError> {
+        let definition_document = serde_json::to_string(definition)?;
+        let case_document = serde_json::to_string(request_case)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO definitions(id, project_id, name, protocol, updated_at, document)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                 project_id = excluded.project_id,
+                 name = excluded.name,
+                 protocol = excluded.protocol,
+                 updated_at = excluded.updated_at,
+                 document = excluded.document",
+            params![
+                definition.id.to_string(),
+                project_id.to_string(),
+                definition.name,
+                protocol_name(definition.contract.kind()),
+                definition.updated_at.to_rfc3339(),
+                definition_document
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM definitions_fts WHERE id = ?1",
+            [definition.id.to_string()],
+        )?;
+        transaction.execute(
+            "INSERT INTO definitions_fts(id, project_id, name, description)
+             VALUES(?1, ?2, ?3, ?4)",
+            params![
+                definition.id.to_string(),
+                project_id.to_string(),
+                definition.name,
+                definition.description_markdown
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO request_cases(id, project_id, definition_id, name, document)
+             VALUES(?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                 project_id = excluded.project_id,
+                 definition_id = excluded.definition_id,
+                 name = excluded.name,
+                 document = excluded.document",
+            params![
+                request_case.id.to_string(),
+                project_id.to_string(),
+                request_case.definition_id.to_string(),
+                request_case.name,
+                case_document
+            ],
+        )?;
+        upsert_definition_node(&transaction, project_id, definition)?;
         transaction.commit()?;
         Ok(())
     }
@@ -247,6 +383,327 @@ impl Database {
         document
             .map(|value| serde_json::from_str(&value).map_err(StorageError::from))
             .transpose()
+    }
+
+    pub fn delete_definition(
+        &self,
+        project_id: EntityId,
+        id: EntityId,
+    ) -> Result<bool, StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM project_nodes
+             WHERE project_id = ?1 AND kind = 'request_case'
+               AND entity_id IN (
+                   SELECT id FROM request_cases
+                   WHERE project_id = ?1 AND definition_id = ?2
+               )",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        transaction.execute(
+            "DELETE FROM request_cases WHERE project_id = ?1 AND definition_id = ?2",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        transaction.execute(
+            "DELETE FROM definitions_fts WHERE project_id = ?1 AND id = ?2",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        transaction.execute(
+            "DELETE FROM project_nodes
+             WHERE project_id = ?1 AND entity_id = ?2 AND kind = 'api_definition'",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        let deleted = transaction.execute(
+            "DELETE FROM definitions WHERE project_id = ?1 AND id = ?2",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(deleted > 0)
+    }
+
+    pub fn save_request_case(
+        &self,
+        project_id: EntityId,
+        request_case: &RequestCase,
+    ) -> Result<(), StorageError> {
+        let document = serde_json::to_string(request_case)?;
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO request_cases(id, project_id, definition_id, name, document)
+             VALUES(?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                 project_id = excluded.project_id,
+                 definition_id = excluded.definition_id,
+                 name = excluded.name,
+                 document = excluded.document",
+            params![
+                request_case.id.to_string(),
+                project_id.to_string(),
+                request_case.definition_id.to_string(),
+                request_case.name,
+                document
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_request_cases(
+        &self,
+        project_id: EntityId,
+        definition_id: EntityId,
+        page: PageRequest,
+    ) -> Result<Page<RequestCase>, StorageError> {
+        let connection = self.connection()?;
+        let total = connection.query_row(
+            "SELECT COUNT(*) FROM request_cases WHERE project_id = ?1 AND definition_id = ?2",
+            params![project_id.to_string(), definition_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+        let mut statement = connection.prepare(
+            "SELECT document FROM request_cases
+             WHERE project_id = ?1 AND definition_id = ?2
+             ORDER BY name, id LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = statement.query_map(
+            params![
+                project_id.to_string(),
+                definition_id.to_string(),
+                page.limit as i64,
+                page.offset as i64
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        Ok(Page {
+            items: deserialize_rows(rows)?,
+            total,
+        })
+    }
+
+    pub fn save_project_node(&self, node: &ProjectNode) -> Result<(), StorageError> {
+        let document = serde_json::to_string(node)?;
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO project_nodes(
+                 id, project_id, parent_id, entity_id, kind, name, sort_order, document
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+                 project_id = excluded.project_id,
+                 parent_id = excluded.parent_id,
+                 entity_id = excluded.entity_id,
+                 kind = excluded.kind,
+                 name = excluded.name,
+                 sort_order = excluded.sort_order,
+                 document = excluded.document",
+            params![
+                node.id.to_string(),
+                node.project_id.to_string(),
+                node.parent_id.map(|id| id.to_string()),
+                node.entity_id.map(|id| id.to_string()),
+                project_node_kind_name(node.kind),
+                node.name,
+                node.sort_order,
+                document
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn ensure_definition_node(
+        &self,
+        project_id: EntityId,
+        definition: &ApiDefinition,
+    ) -> Result<(), StorageError> {
+        let connection = self.connection()?;
+        upsert_definition_node(&connection, project_id, definition)
+    }
+
+    pub fn list_project_nodes(
+        &self,
+        project_id: EntityId,
+        parent_id: Option<EntityId>,
+        page: PageRequest,
+    ) -> Result<Page<ProjectNode>, StorageError> {
+        let project_id = project_id.to_string();
+        let parent_id = parent_id.map(|id| id.to_string());
+        let connection = self.connection()?;
+        let total = connection.query_row(
+            "SELECT COUNT(*) FROM project_nodes
+             WHERE project_id = ?1
+               AND ((?2 IS NULL AND parent_id IS NULL) OR parent_id = ?2)",
+            params![project_id, parent_id],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+        let mut statement = connection.prepare(
+            "SELECT document FROM project_nodes
+             WHERE project_id = ?1
+               AND ((?2 IS NULL AND parent_id IS NULL) OR parent_id = ?2)
+             ORDER BY sort_order, name, id LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = statement.query_map(
+            params![project_id, parent_id, page.limit as i64, page.offset as i64],
+            |row| row.get::<_, String>(0),
+        )?;
+        Ok(Page {
+            items: deserialize_rows(rows)?,
+            total,
+        })
+    }
+
+    pub fn save_scenario(
+        &self,
+        project_id: EntityId,
+        scenario: &TestScenario,
+    ) -> Result<(), StorageError> {
+        let connection = self.connection()?;
+        save_project_document(
+            &connection,
+            "scenarios",
+            scenario.id,
+            project_id,
+            &scenario.name,
+            scenario,
+        )
+    }
+
+    pub fn list_scenarios(&self, project_id: EntityId) -> Result<Vec<TestScenario>, StorageError> {
+        let connection = self.connection()?;
+        list_project_documents(&connection, "scenarios", project_id)
+    }
+
+    pub fn save_mock_profile(
+        &self,
+        project_id: EntityId,
+        profile: &MockProfile,
+    ) -> Result<(), StorageError> {
+        let connection = self.connection()?;
+        save_project_document(
+            &connection,
+            "mock_profiles",
+            profile.id,
+            project_id,
+            &profile.name,
+            profile,
+        )
+    }
+
+    pub fn list_mock_profiles(
+        &self,
+        project_id: EntityId,
+    ) -> Result<Vec<MockProfile>, StorageError> {
+        let connection = self.connection()?;
+        list_project_documents(&connection, "mock_profiles", project_id)
+    }
+
+    pub fn save_run_record(
+        &self,
+        project_id: EntityId,
+        record: &RunRecord,
+    ) -> Result<(), StorageError> {
+        let document = serde_json::to_string(record)?;
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO run_records(id, project_id, started_at, state, document)
+             VALUES(?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                 project_id = excluded.project_id,
+                 started_at = excluded.started_at,
+                 state = excluded.state,
+                 document = excluded.document",
+            params![
+                record.id.to_string(),
+                project_id.to_string(),
+                record.started_at.to_rfc3339(),
+                run_state_name(record.state),
+                document
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_run_records(
+        &self,
+        project_id: EntityId,
+        page: PageRequest,
+    ) -> Result<Page<RunRecord>, StorageError> {
+        let project_id = project_id.to_string();
+        let connection = self.connection()?;
+        let total = connection.query_row(
+            "SELECT COUNT(*) FROM run_records WHERE project_id = ?1",
+            [&project_id],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+        let mut statement = connection.prepare(
+            "SELECT document FROM run_records WHERE project_id = ?1
+             ORDER BY started_at DESC, id DESC LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = statement.query_map(
+            params![project_id, page.limit as i64, page.offset as i64],
+            |row| row.get::<_, String>(0),
+        )?;
+        Ok(Page {
+            items: deserialize_rows(rows)?,
+            total,
+        })
+    }
+
+    pub fn prune_run_records(
+        &self,
+        project_id: EntityId,
+        max_records: usize,
+        max_age_days: i64,
+        now: DateTime<Utc>,
+    ) -> Result<usize, StorageError> {
+        self.prune_run_records_with_body_paths(project_id, max_records, max_age_days, now)
+            .map(|(deleted, _)| deleted)
+    }
+
+    pub fn prune_run_records_with_body_paths(
+        &self,
+        project_id: EntityId,
+        max_records: usize,
+        max_age_days: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(usize, Vec<PathBuf>), StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let cutoff = now
+            .checked_sub_signed(TimeDelta::days(max_age_days.max(0)))
+            .unwrap_or(now);
+        let project_id = project_id.to_string();
+        let body_paths = {
+            let mut statement = transaction.prepare(
+                "SELECT document FROM run_records
+                 WHERE project_id = ?1 AND (
+                     started_at < ?2 OR id NOT IN (
+                         SELECT id FROM run_records WHERE project_id = ?1
+                         ORDER BY started_at DESC, id DESC LIMIT ?3
+                     )
+                 )",
+            )?;
+            let rows = statement.query_map(
+                params![project_id, cutoff.to_rfc3339(), max_records as i64],
+                |row| row.get::<_, String>(0),
+            )?;
+            deserialize_rows::<RunRecord>(rows)?
+                .into_iter()
+                .filter_map(|record| record.body_path.map(PathBuf::from))
+                .collect::<Vec<_>>()
+        };
+        let mut deleted = transaction.execute(
+            "DELETE FROM run_records WHERE project_id = ?1 AND started_at < ?2",
+            params![project_id, cutoff.to_rfc3339()],
+        )?;
+        deleted += transaction.execute(
+            "DELETE FROM run_records
+             WHERE project_id = ?1 AND id NOT IN (
+                 SELECT id FROM run_records WHERE project_id = ?1
+                 ORDER BY started_at DESC, id DESC LIMIT ?2
+             )",
+            params![project_id, max_records as i64],
+        )?;
+        transaction.commit()?;
+        Ok((deleted, body_paths))
     }
 
     pub fn search_definitions(
@@ -330,6 +787,19 @@ impl Database {
         deserialize_rows(documents)
     }
 
+    pub fn delete_environment(
+        &self,
+        project_id: EntityId,
+        id: EntityId,
+    ) -> Result<bool, StorageError> {
+        let connection = self.connection()?;
+        let deleted = connection.execute(
+            "DELETE FROM environments WHERE project_id = ?1 AND id = ?2",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        Ok(deleted > 0)
+    }
+
     pub fn set_setting<T: serde::Serialize>(
         &self,
         key: &str,
@@ -373,6 +843,60 @@ impl Database {
     }
 }
 
+fn upsert_definition_node(
+    connection: &Connection,
+    project_id: EntityId,
+    definition: &ApiDefinition,
+) -> Result<(), StorageError> {
+    let existing = connection
+        .query_row(
+            "SELECT document FROM project_nodes
+             WHERE project_id = ?1 AND entity_id = ?2 AND kind = 'api_definition'
+             ORDER BY sort_order, id LIMIT 1",
+            params![project_id.to_string(), definition.id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let mut node = match existing {
+        Some(document) => serde_json::from_str::<ProjectNode>(&document)?,
+        None => ProjectNode {
+            id: EntityId::new(),
+            project_id,
+            parent_id: None,
+            entity_id: Some(definition.id),
+            kind: ProjectNodeKind::ApiDefinition,
+            name: definition.name.clone(),
+            sort_order: definition.created_at.timestamp_millis(),
+        },
+    };
+    node.name = definition.name.clone();
+    let document = serde_json::to_string(&node)?;
+    connection.execute(
+        "INSERT INTO project_nodes(
+             id, project_id, parent_id, entity_id, kind, name, sort_order, document
+         ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(id) DO UPDATE SET
+             project_id = excluded.project_id,
+             parent_id = excluded.parent_id,
+             entity_id = excluded.entity_id,
+             kind = excluded.kind,
+             name = excluded.name,
+             sort_order = excluded.sort_order,
+             document = excluded.document",
+        params![
+            node.id.to_string(),
+            node.project_id.to_string(),
+            node.parent_id.map(|id| id.to_string()),
+            node.entity_id.map(|id| id.to_string()),
+            project_node_kind_name(node.kind),
+            node.name,
+            node.sort_order,
+            document
+        ],
+    )?;
+    Ok(())
+}
+
 fn deserialize_rows<T>(
     rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<String>>,
 ) -> Result<Vec<T>, StorageError>
@@ -385,6 +909,41 @@ where
         values.push(serde_json::from_str(&document)?);
     }
     Ok(values)
+}
+
+fn save_project_document<T: serde::Serialize>(
+    connection: &Connection,
+    table: &str,
+    id: EntityId,
+    project_id: EntityId,
+    name: &str,
+    value: &T,
+) -> Result<(), StorageError> {
+    let document = serde_json::to_string(value)?;
+    let sql = format!(
+        "INSERT INTO {table}(id, project_id, name, document)
+         VALUES(?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+             project_id = excluded.project_id,
+             name = excluded.name,
+             document = excluded.document"
+    );
+    connection.execute(
+        &sql,
+        params![id.to_string(), project_id.to_string(), name, document],
+    )?;
+    Ok(())
+}
+
+fn list_project_documents<T: serde::de::DeserializeOwned>(
+    connection: &Connection,
+    table: &str,
+    project_id: EntityId,
+) -> Result<Vec<T>, StorageError> {
+    let sql = format!("SELECT document FROM {table} WHERE project_id = ?1 ORDER BY name, id");
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map([project_id.to_string()], |row| row.get::<_, String>(0))?;
+    deserialize_rows(rows)
 }
 
 fn protocol_name(kind: ProtocolKind) -> &'static str {
@@ -407,6 +966,25 @@ fn parse_protocol_name(value: &str) -> Result<ProtocolKind, StorageError> {
         other => Err(StorageError::Secret(format!(
             "unknown protocol in database: {other}"
         ))),
+    }
+}
+
+fn project_node_kind_name(kind: ProjectNodeKind) -> &'static str {
+    match kind {
+        ProjectNodeKind::Folder => "folder",
+        ProjectNodeKind::ApiDefinition => "api_definition",
+        ProjectNodeKind::RequestCase => "request_case",
+        ProjectNodeKind::TestScenario => "test_scenario",
+        ProjectNodeKind::DataModel => "data_model",
+    }
+}
+
+fn run_state_name(state: apitest_core::RunState) -> &'static str {
+    match state {
+        apitest_core::RunState::Running => "running",
+        apitest_core::RunState::Passed => "passed",
+        apitest_core::RunState::Failed => "failed",
+        apitest_core::RunState::Cancelled => "cancelled",
     }
 }
 

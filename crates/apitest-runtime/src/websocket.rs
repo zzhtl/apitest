@@ -4,9 +4,9 @@ use std::{
 };
 
 use apitest_core::{
-    Environment, ExecutionError, ExecutionEvent, ExecutionMetrics, ExecutionRequest,
-    ExecutionStream, ProtocolExecutor, ProtocolKind, ProtocolSpec, ResponseHead, Variable,
-    WebSocketSpec,
+    Environment, ExecutionCommand, ExecutionError, ExecutionEvent, ExecutionHandle,
+    ExecutionMetrics, ExecutionRequest, ExecutionStream, ProtocolExecutor, ProtocolKind,
+    ProtocolSpec, ResponseHead, Variable, WebSocketSpec,
 };
 use apitest_storage::SecretStore;
 use async_stream::try_stream;
@@ -115,6 +115,68 @@ impl ProtocolExecutor for WebSocketExecutor {
                 yield event?;
             }
         })
+    }
+
+    fn start(&self, request: ExecutionRequest) -> ExecutionHandle {
+        let id = request.id;
+        let cancellation = CancellationToken::new();
+        let stream_cancellation = cancellation.clone();
+        let executor = self.clone();
+        let (commands, mut command_receiver) = mpsc::channel(COMMAND_CAPACITY);
+        let events = Box::pin(try_stream! {
+            enum SelectedInput {
+                Command(Option<ExecutionCommand>),
+                Event(Option<Result<ExecutionEvent, ExecutionError>>),
+            }
+
+            let mut session = executor.open(request, stream_cancellation.clone()).await?;
+            let mut accept_commands = true;
+            loop {
+                let input = tokio::select! {
+                    command = command_receiver.recv(), if accept_commands => {
+                        SelectedInput::Command(command)
+                    }
+                    event = session.recv() => SelectedInput::Event(event),
+                };
+                match input {
+                    SelectedInput::Command(command) => {
+                        match command {
+                            Some(ExecutionCommand::SendMessage { media_type, data }) => {
+                                if media_type.as_deref() == Some("application/octet-stream") {
+                                    session.send_binary(data).await?;
+                                } else {
+                                    let message = String::from_utf8(data.to_vec()).map_err(|error| {
+                                        ExecutionError::InvalidRequest(format!(
+                                            "WebSocket text message must be UTF-8: {error}"
+                                        ))
+                                    })?;
+                                    session.send_text(message).await?;
+                                }
+                            }
+                            Some(ExecutionCommand::CompleteInput) => {
+                                session.close().await?;
+                                accept_commands = false;
+                            }
+                            Some(ExecutionCommand::Cancel) => {
+                                stream_cancellation.cancel();
+                                accept_commands = false;
+                            }
+                            None => {
+                                session.close().await?;
+                                accept_commands = false;
+                            }
+                        }
+                    }
+                    SelectedInput::Event(event) => {
+                        let Some(event) = event else {
+                            break;
+                        };
+                        yield event?;
+                    }
+                }
+            }
+        });
+        ExecutionHandle::with_commands(id, events, cancellation, commands)
     }
 }
 

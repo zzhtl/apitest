@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use apitest_core::{Environment, ExecutionEvent, ExecutionRequest, ProtocolSpec, WebSocketSpec};
+use apitest_core::{
+    Environment, ExecutionCommand, ExecutionEvent, ExecutionRequest, ProtocolExecutor,
+    ProtocolSpec, WebSocketSpec,
+};
 use apitest_runtime::WebSocketExecutor;
 use apitest_storage::MemorySecretStore;
 use axum::{
@@ -99,4 +102,73 @@ async fn opens_interactive_session_and_echoes_text() {
     assert!(outgoing, "sent message should appear in timeline");
     assert!(incoming, "echoed message should appear in timeline");
     session.close().await.expect("session should close");
+}
+
+#[tokio::test]
+async fn protocol_handle_sends_messages_and_closes_gracefully() {
+    let endpoint = spawn_server().await;
+    let executor = WebSocketExecutor::new(Arc::new(MemorySecretStore::default()));
+    let request = ExecutionRequest::new(
+        ProtocolSpec::WebSocket(WebSocketSpec {
+            url: endpoint,
+            query: Vec::new(),
+            headers: Vec::new(),
+            subprotocols: Vec::new(),
+            validate_tls: true,
+            connect_timeout_ms: 1_000,
+        }),
+        Environment::new("test"),
+    );
+    let mut handle = executor.start(request);
+
+    handle
+        .try_command(ExecutionCommand::SendMessage {
+            media_type: Some("text/plain".to_owned()),
+            data: "from handle".into(),
+        })
+        .expect("interactive handle should accept messages");
+
+    let mut outgoing = false;
+    let mut incoming = false;
+    for _ in 0..6 {
+        let event = handle
+            .events
+            .next()
+            .await
+            .expect("handle should emit an event")
+            .expect("handle event should succeed");
+        if let ExecutionEvent::Message {
+            outgoing: direction,
+            data,
+            ..
+        } = event
+            && data.as_ref() == b"from handle"
+        {
+            outgoing |= direction;
+            incoming |= !direction;
+        }
+        if outgoing && incoming {
+            break;
+        }
+    }
+    assert!(
+        outgoing && incoming,
+        "handle should stream both message directions"
+    );
+
+    handle
+        .try_command(ExecutionCommand::CompleteInput)
+        .expect("interactive handle should accept graceful close");
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while let Some(event) = handle.events.next().await {
+            if matches!(event, Ok(ExecutionEvent::Completed(_))) {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .expect("WebSocket close should complete promptly");
+
+    assert!(completed, "graceful close should emit a completed event");
 }

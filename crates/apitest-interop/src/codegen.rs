@@ -1,4 +1,5 @@
 use apitest_core::{BodySpec, HttpSpec};
+use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeLanguage {
@@ -21,16 +22,16 @@ fn curl(spec: &HttpSpec) -> String {
     let mut command = format!(
         "curl --request {} --url {}",
         spec.method,
-        shell_quote(&spec.url)
+        shell_quote(&render_url(spec))
     );
     for header in spec.headers.iter().filter(|header| header.enabled) {
         command.push_str(&format!(
-            " \\\n+  --header {}",
+            " \\\n  --header {}",
             shell_quote(&format!("{}: {}", header.name, header.value))
         ));
     }
     if let Some(body) = text_body(&spec.body) {
-        command.push_str(&format!(" \\\n+  --data {}", shell_quote(body)));
+        command.push_str(&format!(" \\\n  --data {}", shell_quote(body)));
     }
     command
 }
@@ -38,7 +39,8 @@ fn curl(spec: &HttpSpec) -> String {
 fn rust_reqwest(spec: &HttpSpec) -> String {
     let mut request = format!(
         "let client = reqwest::Client::new();\nlet response = client\n    .request(reqwest::Method::{}, {:?})",
-        spec.method, spec.url
+        spec.method,
+        render_url(spec)
     );
     for header in spec.headers.iter().filter(|header| header.enabled) {
         request.push_str(&format!(
@@ -80,7 +82,7 @@ fn javascript_fetch(spec: &HttpSpec) -> String {
     options.push_str("\n}");
     format!(
         "const response = await fetch({:?}, {options});\nconst data = await response.json();",
-        spec.url
+        render_url(spec)
     )
 }
 
@@ -97,7 +99,7 @@ fn python_requests(spec: &HttpSpec) -> String {
     format!(
         "import requests\n\nresponse = requests.request(\n    {:?},\n    {:?},\n    headers={headers:?}{body}\n)\nprint(response.text)",
         spec.method.to_string(),
-        spec.url
+        render_url(spec)
     )
 }
 
@@ -110,4 +112,17 @@ fn text_body(body: &BodySpec) -> Option<&str> {
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn render_url(spec: &HttpSpec) -> String {
+    let Ok(mut url) = Url::parse(&spec.url) else {
+        return spec.url.clone();
+    };
+    {
+        let mut query = url.query_pairs_mut();
+        for parameter in spec.query.iter().filter(|parameter| parameter.enabled) {
+            query.append_pair(&parameter.name, &parameter.value);
+        }
+    }
+    url.into()
 }

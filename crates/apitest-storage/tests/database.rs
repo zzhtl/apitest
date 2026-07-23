@@ -67,3 +67,66 @@ fn searches_definition_names_without_loading_every_document() {
     assert_eq!(matches.len(), 2);
     assert!(matches.iter().all(|item| item.name.contains("user")));
 }
+
+#[test]
+fn deletes_definitions_from_storage_and_search() {
+    let database = Database::open_in_memory().expect("database should open");
+    let project = Project::new("Delete definition");
+    let definition = ApiDefinition::new(
+        "Disposable request",
+        ProtocolSpec::Http(HttpSpec::new(HttpMethod::Get, "https://example.test")),
+    );
+    database
+        .save_project(&project)
+        .expect("project should save");
+    database
+        .save_definition(project.id, &definition)
+        .expect("definition should save");
+
+    assert!(
+        database
+            .delete_definition(project.id, definition.id)
+            .expect("definition should delete")
+    );
+    assert!(
+        database
+            .list_definitions(project.id)
+            .expect("definitions should load")
+            .is_empty()
+    );
+    assert!(
+        database
+            .search_definitions(project.id, "Disposable", 10)
+            .expect("search should succeed")
+            .is_empty()
+    );
+}
+
+#[test]
+fn deletes_environments_without_affecting_the_project() {
+    let database = Database::open_in_memory().expect("database should open");
+    let project = Project::new("Delete environment");
+    let environment = Environment::new("Temporary");
+    database
+        .save_project(&project)
+        .expect("project should save");
+    database
+        .save_environment(project.id, &environment)
+        .expect("environment should save");
+
+    assert!(
+        database
+            .delete_environment(project.id, environment.id)
+            .expect("environment should delete")
+    );
+    assert!(
+        database
+            .list_environments(project.id)
+            .expect("environments should load")
+            .is_empty()
+    );
+    assert_eq!(
+        database.list_projects().expect("projects should load"),
+        vec![project]
+    );
+}

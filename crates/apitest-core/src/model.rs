@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{BodySpec, KeyValue, ProtocolSpec};
+use crate::{ApiComponents, ApiContract, AssertionRule, ExtractorRule, ProtocolSpec, Variable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -51,13 +51,13 @@ pub struct ApiDefinition {
     pub description_markdown: String,
     pub status: ApiStatus,
     pub tags: Vec<String>,
-    pub protocol: ProtocolSpec,
+    pub contract: ApiContract,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl ApiDefinition {
-    pub fn new(name: impl Into<String>, protocol: ProtocolSpec) -> Self {
+    pub fn new(name: impl Into<String>, contract: impl Into<ApiContract>) -> Self {
         let now = Utc::now();
         Self {
             id: EntityId::new(),
@@ -65,7 +65,7 @@ impl ApiDefinition {
             description_markdown: String::new(),
             status: ApiStatus::Designing,
             tags: Vec::new(),
-            protocol,
+            contract: contract.into(),
             created_at: now,
             updated_at: now,
         }
@@ -77,11 +77,12 @@ pub struct RequestCase {
     pub id: EntityId,
     pub definition_id: EntityId,
     pub name: String,
-    pub query_values: Vec<KeyValue>,
-    pub header_values: Vec<KeyValue>,
-    pub body: BodySpec,
+    pub protocol: ProtocolSpec,
+    pub local_variables: Vec<Variable>,
     pub pre_request_script: String,
     pub post_response_script: String,
+    pub assertions: Vec<AssertionRule>,
+    pub extractors: Vec<ExtractorRule>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -93,11 +94,12 @@ impl RequestCase {
             id: EntityId::new(),
             definition_id: definition.id,
             name: name.into(),
-            query_values: Vec::new(),
-            header_values: Vec::new(),
-            body: BodySpec::None,
+            protocol: definition.contract.example_protocol(),
+            local_variables: Vec::new(),
             pre_request_script: String::new(),
             post_response_script: String::new(),
+            assertions: Vec::new(),
+            extractors: Vec::new(),
             created_at: now,
             updated_at: now,
         }
@@ -109,6 +111,7 @@ pub struct Project {
     pub id: EntityId,
     pub name: String,
     pub description: String,
+    pub components: ApiComponents,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -120,6 +123,7 @@ impl Project {
             id: EntityId::new(),
             name: name.into(),
             description: String::new(),
+            components: ApiComponents::default(),
             created_at: now,
             updated_at: now,
         }
