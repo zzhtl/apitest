@@ -95,6 +95,8 @@ pub struct ApiTestApp {
     pub(crate) show_snippet: bool,
     pub(crate) show_palette: bool,
     pub(crate) palette_query: String,
+    /// Node being renamed inline in the resource tree, with its draft name.
+    pub(crate) rename_target: Option<(EntityId, String)>,
     pub(crate) snippet_language: CodeLanguage,
     pub(crate) openapi_preview_tab: OpenApiPreviewTab,
     pub(crate) openapi_source: String,
@@ -309,6 +311,7 @@ impl ApiTestApp {
             show_snippet: false,
             show_palette: false,
             palette_query: String::new(),
+            rename_target: None,
             snippet_language: CodeLanguage::Curl,
             openapi_preview_tab: OpenApiPreviewTab::Yaml,
             openapi_source: String::new(),
@@ -401,6 +404,7 @@ impl eframe::App for ApiTestApp {
             self.snippet_window(ui.ctx());
         }
         self.command_palette(ui.ctx());
+        self.rename_window(ui.ctx());
         self.confirmation_window(ui.ctx());
         self.toast_area(ui.ctx());
     }

@@ -140,4 +140,7 @@ pub(crate) enum Confirmation {
     Unsaved(PendingAction),
     DeleteRequest(EntityId),
     DeleteEnvironment(EntityId),
+    DeleteFolder(EntityId),
+    DeleteScenario(EntityId),
+    DeleteMock(EntityId),
 }

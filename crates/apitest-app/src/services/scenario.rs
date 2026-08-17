@@ -214,6 +214,35 @@ impl ApiTestApp {
         });
     }
 
+    pub(crate) fn delete_scenario(&mut self, id: EntityId) {
+        let Some(database) = self.database.clone() else {
+            self.toast(
+                ToastKind::Error,
+                self.tr("本地数据库不可用", "Local database unavailable"),
+            );
+            return;
+        };
+        if let Err(error) = database.delete_scenario(self.project.id, id) {
+            self.toast(ToastKind::Error, error.to_string());
+            return;
+        }
+        self.scenario_snapshots.remove(&id);
+        if let Some(index) = self.scenarios.iter().position(|scenario| scenario.id == id) {
+            self.scenarios.remove(index);
+        }
+        self.selected_scenario = self
+            .selected_scenario
+            .min(self.scenarios.len().saturating_sub(1));
+        self.close_document(DocumentId {
+            kind: DocumentKind::Scenario,
+            entity_id: id,
+        });
+        self.toast(
+            ToastKind::Success,
+            self.tr("场景已删除", "Scenario deleted"),
+        );
+    }
+
     pub(crate) fn stop_current_scenario(&mut self) {
         if let Some(cancellation) = self.scenario_cancellation.take() {
             cancellation.cancel();

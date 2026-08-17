@@ -10,5 +10,6 @@ pub(crate) mod save;
 pub(crate) mod scenario;
 pub(crate) mod secrets;
 pub(crate) mod storage;
+pub(crate) mod tree;
 pub(crate) mod validate;
 pub(crate) mod verification;

@@ -196,3 +196,123 @@ fn run_history_retention_prunes_oldest_records() {
     assert_eq!(records.items[0].elapsed_ms, 3);
     assert_eq!(records.items[1].elapsed_ms, 2);
 }
+
+#[test]
+fn deleting_a_folder_removes_every_nested_node() {
+    let database = Database::open_in_memory().expect("database should open");
+    let project = Project::new("Tree");
+    database
+        .save_project(&project)
+        .expect("project should save");
+
+    let folder = ProjectNode {
+        id: EntityId::new(),
+        project_id: project.id,
+        parent_id: None,
+        entity_id: None,
+        kind: ProjectNodeKind::Folder,
+        name: "订单".into(),
+        sort_order: 0,
+    };
+    let nested = ProjectNode {
+        id: EntityId::new(),
+        project_id: project.id,
+        parent_id: Some(folder.id),
+        entity_id: None,
+        kind: ProjectNodeKind::Folder,
+        name: "查询".into(),
+        sort_order: 0,
+    };
+    database.save_project_node(&folder).expect("folder saves");
+    database.save_project_node(&nested).expect("nested saves");
+
+    let definition = ApiDefinition::new(
+        "列表",
+        ProtocolSpec::Http(HttpSpec::new(HttpMethod::Get, "https://example.com/orders")),
+    );
+    database
+        .save_definition(project.id, &definition)
+        .expect("definition saves");
+    let mut leaf = ProjectNode {
+        id: EntityId::new(),
+        project_id: project.id,
+        parent_id: Some(nested.id),
+        entity_id: Some(definition.id),
+        kind: ProjectNodeKind::ApiDefinition,
+        name: definition.name.clone(),
+        sort_order: 0,
+    };
+    leaf.sort_order = 1;
+    database.save_project_node(&leaf).expect("leaf saves");
+
+    assert_eq!(
+        database
+            .definitions_under(project.id, folder.id)
+            .expect("descendants"),
+        vec![definition.id],
+    );
+
+    let removed = database
+        .delete_project_node(project.id, folder.id)
+        .expect("folder deletes");
+    assert_eq!(removed, 3, "folder, nested folder and leaf");
+    assert!(
+        database
+            .list_project_nodes(project.id, None, PageRequest::new(0, 10))
+            .expect("root listing")
+            .items
+            .is_empty()
+    );
+}
+
+#[test]
+fn scenarios_and_mock_profiles_can_be_deleted() {
+    let database = Database::open_in_memory().expect("database should open");
+    let project = Project::new("Automation");
+    database
+        .save_project(&project)
+        .expect("project should save");
+
+    let scenario = TestScenario {
+        name: "冒烟".into(),
+        ..TestScenario::default()
+    };
+    let profile = MockProfile {
+        name: "本地".into(),
+        ..MockProfile::default()
+    };
+    database
+        .save_scenario(project.id, &scenario)
+        .expect("scenario saves");
+    database
+        .save_mock_profile(project.id, &profile)
+        .expect("profile saves");
+
+    assert!(
+        database
+            .delete_scenario(project.id, scenario.id)
+            .expect("scenario deletes")
+    );
+    assert!(
+        database
+            .delete_mock_profile(project.id, profile.id)
+            .expect("profile deletes")
+    );
+    assert!(
+        database
+            .list_scenarios(project.id)
+            .expect("scenarios")
+            .is_empty()
+    );
+    assert!(
+        database
+            .list_mock_profiles(project.id)
+            .expect("profiles")
+            .is_empty()
+    );
+    assert!(
+        !database
+            .delete_scenario(project.id, scenario.id)
+            .expect("second delete is a no-op")
+    );
+}

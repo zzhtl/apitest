@@ -1,4 +1,4 @@
-use apitest_core::{MockProfile, generate_mock_rules};
+use apitest_core::{EntityId, MockProfile, generate_mock_rules};
 use apitest_runtime::{MockRoute, MockServer};
 use eframe::egui::{self};
 
@@ -114,6 +114,44 @@ impl ApiTestApp {
             let _ = sender.send(RuntimeMessage::MockStarted(run_id, result));
             context.request_repaint();
         });
+    }
+
+    pub(crate) fn delete_mock(&mut self, id: EntityId) {
+        let Some(database) = self.database.clone() else {
+            self.toast(
+                ToastKind::Error,
+                self.tr("本地数据库不可用", "Local database unavailable"),
+            );
+            return;
+        };
+        if let Err(error) = database.delete_mock_profile(self.project.id, id) {
+            self.toast(ToastKind::Error, error.to_string());
+            return;
+        }
+        // Stop the server before the profile that describes it disappears.
+        if self
+            .mock_profiles
+            .get(self.selected_mock)
+            .is_some_and(|profile| profile.id == id)
+        {
+            self.stop_current_mock();
+        }
+        self.mock_snapshots.remove(&id);
+        if let Some(index) = self
+            .mock_profiles
+            .iter()
+            .position(|profile| profile.id == id)
+        {
+            self.mock_profiles.remove(index);
+        }
+        self.selected_mock = self
+            .selected_mock
+            .min(self.mock_profiles.len().saturating_sub(1));
+        self.close_document(DocumentId {
+            kind: DocumentKind::Mock,
+            entity_id: id,
+        });
+        self.toast(ToastKind::Success, self.tr("Mock 已删除", "Mock deleted"));
     }
 
     pub(crate) fn stop_current_mock(&mut self) {

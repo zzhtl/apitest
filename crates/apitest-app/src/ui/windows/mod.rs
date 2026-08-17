@@ -1,4 +1,5 @@
 pub(crate) mod palette;
+pub(crate) mod rename;
 pub(crate) mod snippet;
 
 use std::time::Duration;
@@ -255,20 +256,50 @@ impl ApiTestApp {
             Confirmation::Unsaved(_) => self.tr("未保存的更改", "Unsaved changes"),
             Confirmation::DeleteRequest(_) => self.tr("删除请求", "Delete request"),
             Confirmation::DeleteEnvironment(_) => self.tr("删除环境", "Delete environment"),
+            Confirmation::DeleteFolder(_) => self.tr("删除文件夹", "Delete folder"),
+            Confirmation::DeleteScenario(_) => self.tr("删除场景", "Delete scenario"),
+            Confirmation::DeleteMock(_) => self.tr("删除 Mock", "Delete mock"),
         };
         let message = match confirmation {
-            Confirmation::Unsaved(_) => self.tr(
-                "当前内容尚未保存。",
-                "The current changes have not been saved.",
-            ),
-            Confirmation::DeleteRequest(_) => self.tr(
-                "该请求及其本地密钥将被删除。",
-                "This request and its local secrets will be deleted.",
-            ),
-            Confirmation::DeleteEnvironment(_) => self.tr(
-                "该环境及其本地密钥将被删除。",
-                "This environment and its local secrets will be deleted.",
-            ),
+            Confirmation::Unsaved(_) => self
+                .tr(
+                    "当前内容尚未保存。",
+                    "The current changes have not been saved.",
+                )
+                .to_owned(),
+            Confirmation::DeleteRequest(_) => self
+                .tr(
+                    "该请求及其本地密钥将被删除。",
+                    "This request and its local secrets will be deleted.",
+                )
+                .to_owned(),
+            Confirmation::DeleteEnvironment(_) => self
+                .tr(
+                    "该环境及其本地密钥将被删除。",
+                    "This environment and its local secrets will be deleted.",
+                )
+                .to_owned(),
+            // Spell out the blast radius: a folder takes its requests with it.
+            Confirmation::DeleteFolder(node) => {
+                let count = self.folder_request_count(node);
+                match self.language {
+                    Language::Chinese => {
+                        format!("该文件夹及其中的 {count} 个请求（含本地密钥）将被删除。")
+                    }
+                    Language::English => format!(
+                        "This folder and the {count} requests inside it will be deleted, along with their local secrets."
+                    ),
+                }
+            }
+            Confirmation::DeleteScenario(_) => self
+                .tr("该测试场景将被删除。", "This scenario will be deleted.")
+                .to_owned(),
+            Confirmation::DeleteMock(_) => self
+                .tr(
+                    "该 Mock 服务将被删除。",
+                    "This mock server will be deleted.",
+                )
+                .to_owned(),
         };
         let mut save = false;
         let mut discard = false;
@@ -280,7 +311,7 @@ impl ApiTestApp {
             .collapsible(false)
             .show(context, |ui| {
                 ui.set_min_width(340.0);
-                ui.label(message);
+                ui.label(&message);
                 ui.add_space(12.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     match confirmation {
@@ -292,7 +323,11 @@ impl ApiTestApp {
                                 discard = true;
                             }
                         }
-                        Confirmation::DeleteRequest(_) | Confirmation::DeleteEnvironment(_) => {
+                        Confirmation::DeleteRequest(_)
+                        | Confirmation::DeleteEnvironment(_)
+                        | Confirmation::DeleteFolder(_)
+                        | Confirmation::DeleteScenario(_)
+                        | Confirmation::DeleteMock(_) => {
                             if ui
                                 .button(
                                     RichText::new(self.tr("删除", "Delete"))
@@ -342,6 +377,9 @@ impl ApiTestApp {
             match confirmation {
                 Confirmation::DeleteRequest(id) => self.delete_request(id),
                 Confirmation::DeleteEnvironment(id) => self.delete_environment(id),
+                Confirmation::DeleteFolder(id) => self.delete_folder(id),
+                Confirmation::DeleteScenario(id) => self.delete_scenario(id),
+                Confirmation::DeleteMock(id) => self.delete_mock(id),
                 Confirmation::Unsaved(_) => {}
             }
         }

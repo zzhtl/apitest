@@ -1,9 +1,10 @@
-use apitest_core::EntityId;
+use apitest_core::{EntityId, ProjectNodeKind};
 use egui_kittest::Harness;
 
 use super::support::test_app;
 use crate::app::ACTIVE_PROJECT_SETTING;
 use crate::services::loader::document_tabs_setting;
+use crate::services::tree::TreeAction;
 use crate::state::action::PendingAction;
 use crate::workbench::{DocumentId, DocumentKind, DocumentTabs};
 
@@ -62,5 +63,114 @@ fn opened_documents_are_persisted_per_project() {
             kind: DocumentKind::Environment,
             entity_id: environment_id
         })
+    );
+}
+
+/// Folders can be created, renamed, moved and deleted from the tree — none of
+/// which the sidebar could do before.
+#[test]
+fn resource_tree_supports_folders_and_moves() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_eframe(test_app);
+
+    harness
+        .state_mut()
+        .apply_tree_action(TreeAction::NewFolder { parent: None });
+    let (folder, _) = harness
+        .state()
+        .rename_target
+        .clone()
+        .expect("a new folder is offered for renaming");
+    harness.state_mut().rename_target = None;
+    harness.state_mut().rename_resource(folder, "订单");
+
+    harness
+        .state_mut()
+        .apply_tree_action(TreeAction::NewFolder {
+            parent: Some(folder),
+        });
+    let (nested, _) = harness
+        .state()
+        .rename_target
+        .clone()
+        .expect("a nested folder is offered for renaming");
+    harness.state_mut().rename_target = None;
+
+    let root = harness.state().resource_pages[&None]
+        .items
+        .iter()
+        .filter(|node| node.kind == ProjectNodeKind::Folder)
+        .count();
+    assert_eq!(root, 1, "only the parent folder sits at the root");
+
+    // Moving the nested folder back to the root re-parents it.
+    harness.state_mut().move_resource(nested, None);
+    harness.state_mut().reload_resource_page(None);
+    let root = harness.state().resource_pages[&None]
+        .items
+        .iter()
+        .filter(|node| node.kind == ProjectNodeKind::Folder)
+        .count();
+    assert_eq!(root, 2, "the nested folder moved out");
+
+    // A folder may not become its own descendant.
+    harness.state_mut().move_resource(nested, Some(nested));
+    harness.state_mut().reload_resource_page(None);
+    assert_eq!(
+        harness.state().resource_pages[&None]
+            .items
+            .iter()
+            .filter(|node| node.kind == ProjectNodeKind::Folder)
+            .count(),
+        2,
+    );
+
+    harness.state_mut().delete_folder(folder);
+    harness.state_mut().reload_resource_page(None);
+    assert_eq!(
+        harness.state().resource_pages[&None]
+            .items
+            .iter()
+            .filter(|node| node.kind == ProjectNodeKind::Folder)
+            .count(),
+        1,
+        "deleting a folder removes it from the tree",
+    );
+}
+
+/// Scenarios and mock profiles could be created but never removed.
+#[test]
+fn scenarios_and_mocks_can_be_deleted_from_the_sidebar() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_eframe(test_app);
+    harness
+        .state_mut()
+        .perform_action(PendingAction::NewScenario);
+    harness.state_mut().save_current_scenario();
+    harness.state_mut().perform_action(PendingAction::NewMock);
+    harness.state_mut().save_current_mock();
+    let scenario = harness.state().scenarios[0].id;
+    let mock = harness.state().mock_profiles[0].id;
+
+    harness.state_mut().delete_scenario(scenario);
+    harness.state_mut().delete_mock(mock);
+
+    assert!(harness.state().scenarios.is_empty());
+    assert!(harness.state().mock_profiles.is_empty());
+    let database = harness.state().database.clone().expect("database");
+    let project = harness.state().project.id;
+    assert!(
+        database
+            .list_scenarios(project)
+            .expect("scenarios")
+            .is_empty()
+    );
+    assert!(
+        database
+            .list_mock_profiles(project)
+            .expect("profiles")
+            .is_empty()
     );
 }

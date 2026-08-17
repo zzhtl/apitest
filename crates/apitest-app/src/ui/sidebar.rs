@@ -1,11 +1,12 @@
-use apitest_core::{ProjectNodeKind, ProtocolKind, ProtocolSpec};
-use eframe::egui::{self, Color32, RichText, Stroke, TextFormat, text::LayoutJob};
+use apitest_core::{EntityId, ProjectNode, ProjectNodeKind, ProtocolKind, ProtocolSpec};
+use eframe::egui::{self, RichText, TextFormat, text::LayoutJob};
 
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::services::document::document_snapshot;
 use crate::services::history::{HISTORY_MAX_AGE_DAYS, HISTORY_MAX_RECORDS};
-use crate::state::action::PendingAction;
+use crate::services::tree::TreeAction;
+use crate::state::action::{Confirmation, PendingAction};
 use crate::state::workspace::{ResourceRow, WorkspaceRequest};
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::tokens::pad;
@@ -22,6 +23,8 @@ impl ApiTestApp {
         let mut selection = None;
         let mut toggle_resource = None;
         let mut load_more = None;
+        let mut tree_action = None;
+        let mut drop_target: Option<(EntityId, Option<EntityId>)> = None;
         let resource_rows = self.visible_resource_rows();
         egui::Frame::new()
             .fill(palette.panel)
@@ -33,6 +36,10 @@ impl ApiTestApp {
                     })
                     .response
                     .on_hover_text(self.tr("新建请求", "New request"));
+                    if icon_button(ui, "folder-plus", self.tr("新建文件夹", "New folder")).clicked()
+                    {
+                        tree_action = Some(TreeAction::NewFolder { parent: None });
+                    }
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -48,29 +55,8 @@ impl ApiTestApp {
                                 ResourceRow::Node { node, depth } => {
                                     ui.horizontal(|ui| {
                                         ui.add_space(*depth as f32 * 14.0);
-                                        if node.kind == ProjectNodeKind::Folder {
-                                            let marker =
-                                                if self.expanded_resources.contains(&node.id) {
-                                                    "▾"
-                                                } else {
-                                                    "▸"
-                                                };
-                                            if ui
-                                                .add_sized(
-                                                    [ui.available_width(), 32.0],
-                                                    egui::Button::new(format!(
-                                                        "{marker}  {}",
-                                                        node.name
-                                                    ))
-                                                    .fill(Color32::TRANSPARENT)
-                                                    .stroke(Stroke::NONE),
-                                                )
-                                                .clicked()
-                                            {
-                                                toggle_resource = Some(node.id);
-                                            }
-                                            return;
-                                        }
+                                        let is_folder = node.kind == ProjectNodeKind::Folder;
+                                        let expanded = self.expanded_resources.contains(&node.id);
                                         let request = node.entity_id.and_then(|id| {
                                             self.requests.iter().find(|request| request.id() == id)
                                         });
@@ -79,22 +65,55 @@ impl ApiTestApp {
                                                 .get(self.selected)
                                                 .is_some_and(|current| current.id() == request.id())
                                         });
-                                        let response = if let Some(request) = request {
-                                            sidebar_row(
-                                                ui,
-                                                selected,
-                                                request_row_text(request, palette),
+                                        // Every row is a drag source so it can be
+                                        // moved between folders.
+                                        let payload = node.id;
+                                        let response = ui
+                                            .dnd_drag_source(
+                                                egui::Id::new(("resource", node.id)),
+                                                payload,
+                                                |ui| {
+                                                    if is_folder {
+                                                        let marker =
+                                                            if expanded { "▾" } else { "▸" };
+                                                        sidebar_row(
+                                                            ui,
+                                                            false,
+                                                            format!("{marker}  {}", node.name),
+                                                        );
+                                                    } else if let Some(request) = request {
+                                                        sidebar_row(
+                                                            ui,
+                                                            selected,
+                                                            request_row_text(request, palette),
+                                                        );
+                                                    } else {
+                                                        sidebar_row(ui, false, node.name.as_str());
+                                                    }
+                                                },
                                             )
-                                        } else {
-                                            sidebar_row(ui, false, node.name.as_str())
-                                        };
-                                        if response.clicked()
-                                            && !selected
-                                            && let Some(id) = node.entity_id
-                                            && node.kind == ProjectNodeKind::ApiDefinition
+                                            .response;
+                                        if is_folder
+                                            && let Some(dragged) =
+                                                dropped_payload(ui, &response, node.id)
                                         {
-                                            selection = Some(id);
+                                            drop_target = Some((dragged, Some(node.id)));
                                         }
+                                        if response.clicked() {
+                                            if is_folder {
+                                                toggle_resource = Some(node.id);
+                                            } else if !selected
+                                                && let Some(id) = node.entity_id
+                                                && node.kind == ProjectNodeKind::ApiDefinition
+                                            {
+                                                selection = Some(id);
+                                            }
+                                        }
+                                        self.resource_context_menu(
+                                            &response,
+                                            node,
+                                            &mut tree_action,
+                                        );
                                     });
                                 }
                                 ResourceRow::More { parent_id, depth } => {
@@ -150,12 +169,91 @@ impl ApiTestApp {
         if let Some(parent_id) = load_more {
             self.load_more_resources(parent_id);
         }
+        if let Some((node, parent)) = drop_target {
+            self.move_resource(node, parent);
+        }
+        if let Some(action) = tree_action {
+            self.apply_tree_action(action);
+        }
+    }
+
+    /// Right-click actions for one tree row.
+    fn resource_context_menu(
+        &self,
+        response: &egui::Response,
+        node: &ProjectNode,
+        action: &mut Option<TreeAction>,
+    ) {
+        let is_folder = node.kind == ProjectNodeKind::Folder;
+        egui::containers::Popup::context_menu(response).show(|ui| {
+            ui.set_min_width(180.0);
+            if is_folder
+                && ui
+                    .button(theme::icon_label(
+                        "folder-plus",
+                        self.tr("新建子文件夹", "New subfolder"),
+                        icon_size::SM,
+                        ui.palette().text,
+                    ))
+                    .clicked()
+            {
+                *action = Some(TreeAction::NewFolder {
+                    parent: Some(node.id),
+                });
+                ui.close();
+            }
+            if ui
+                .button(theme::icon_label(
+                    "pencil",
+                    self.tr("重命名", "Rename"),
+                    icon_size::SM,
+                    ui.palette().text,
+                ))
+                .clicked()
+            {
+                *action = Some(TreeAction::Rename {
+                    node: node.id,
+                    name: node.name.clone(),
+                });
+                ui.close();
+            }
+            if !is_folder
+                && let Some(entity_id) = node.entity_id
+                && ui
+                    .button(theme::icon_label(
+                        "copy",
+                        self.tr("复制请求", "Duplicate request"),
+                        icon_size::SM,
+                        ui.palette().text,
+                    ))
+                    .clicked()
+            {
+                *action = Some(TreeAction::Duplicate { entity_id });
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .button(RichText::new(self.tr("删除", "Delete")).color(ui.palette().danger))
+                .clicked()
+            {
+                *action = Some(if is_folder {
+                    TreeAction::DeleteFolder { node: node.id }
+                } else {
+                    match node.entity_id {
+                        Some(entity_id) => TreeAction::DeleteRequest { entity_id },
+                        None => TreeAction::DeleteFolder { node: node.id },
+                    }
+                });
+                ui.close();
+            }
+        });
     }
 
     pub(crate) fn scenario_sidebar(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
         let mut select = None;
         let mut create = false;
+        let mut delete = None;
         egui::Frame::new()
             .fill(palette.panel)
             .inner_margin(pad::CHROME)
@@ -178,9 +276,20 @@ impl ApiTestApp {
                 } else {
                     scenario.name.clone()
                 };
-                if sidebar_row(ui, index == self.selected_scenario, label).clicked() {
+                let row = sidebar_row(ui, index == self.selected_scenario, label);
+                if row.clicked() {
                     select = Some(scenario.id);
                 }
+                let id = scenario.id;
+                egui::containers::Popup::context_menu(&row).show(|ui| {
+                    if ui
+                        .button(RichText::new(self.tr("删除", "Delete")).color(ui.palette().danger))
+                        .clicked()
+                    {
+                        delete = Some(id);
+                        ui.close();
+                    }
+                });
             }
         });
         if create {
@@ -189,12 +298,16 @@ impl ApiTestApp {
         if let Some(id) = select {
             self.queue_action(PendingAction::SelectScenario(id));
         }
+        if let Some(id) = delete {
+            self.confirmation = Some(Confirmation::DeleteScenario(id));
+        }
     }
 
     pub(crate) fn mock_sidebar(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
         let mut select = None;
         let mut create = false;
+        let mut delete = None;
         egui::Frame::new()
             .fill(palette.panel)
             .inner_margin(pad::CHROME)
@@ -217,9 +330,20 @@ impl ApiTestApp {
                 } else {
                     profile.name.clone()
                 };
-                if sidebar_row(ui, index == self.selected_mock, label).clicked() {
+                let row = sidebar_row(ui, index == self.selected_mock, label);
+                if row.clicked() {
                     select = Some(profile.id);
                 }
+                let id = profile.id;
+                egui::containers::Popup::context_menu(&row).show(|ui| {
+                    if ui
+                        .button(RichText::new(self.tr("删除", "Delete")).color(ui.palette().danger))
+                        .clicked()
+                    {
+                        delete = Some(id);
+                        ui.close();
+                    }
+                });
             }
         });
         if create {
@@ -227,6 +351,9 @@ impl ApiTestApp {
         }
         if let Some(id) = select {
             self.queue_action(PendingAction::SelectMock(id));
+        }
+        if let Some(id) = delete {
+            self.confirmation = Some(Confirmation::DeleteMock(id));
         }
     }
 
@@ -390,4 +517,13 @@ pub(crate) fn request_row_text(request: &WorkspaceRequest, palette: Palette) -> 
         },
     );
     job
+}
+
+/// The node a drag released over `response`, ignoring self-drops.
+fn dropped_payload(ui: &egui::Ui, response: &egui::Response, target: EntityId) -> Option<EntityId> {
+    if !response.contains_pointer() || !ui.input(|input| input.pointer.any_released()) {
+        return None;
+    }
+    let payload = egui::DragAndDrop::take_payload::<EntityId>(ui.ctx())?;
+    (*payload != target).then_some(*payload)
 }

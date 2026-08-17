@@ -263,6 +263,7 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         show_snippet: false,
         show_palette: false,
         palette_query: String::new(),
+        rename_target: None,
         snippet_language: apitest_interop::CodeLanguage::Curl,
         openapi_preview_tab: OpenApiPreviewTab::Yaml,
         openapi_source: String::new(),

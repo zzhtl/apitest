@@ -422,6 +422,98 @@ impl Database {
         Ok(deleted > 0)
     }
 
+    /// Every definition beneath `folder`, at any depth.
+    ///
+    /// Callers need this before deleting a folder so they can tell the user how
+    /// much goes with it and clean up the matching secrets.
+    pub fn definitions_under(
+        &self,
+        project_id: EntityId,
+        folder: EntityId,
+    ) -> Result<Vec<EntityId>, StorageError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "WITH RECURSIVE descendants(id) AS (
+                 SELECT id FROM project_nodes
+                 WHERE project_id = ?1 AND id = ?2
+                 UNION ALL
+                 SELECT n.id FROM project_nodes n
+                 JOIN descendants d ON n.parent_id = d.id
+                 WHERE n.project_id = ?1
+             )
+             SELECT n.entity_id FROM project_nodes n
+             JOIN descendants d ON n.id = d.id
+             WHERE n.kind = 'api_definition' AND n.entity_id IS NOT NULL",
+        )?;
+        let rows = statement
+            .query_map(params![project_id.to_string(), folder.to_string()], |row| {
+                row.get::<_, String>(0)
+            })?;
+        let mut ids = Vec::new();
+        for row in rows {
+            let raw = row?;
+            let uuid = Uuid::parse_str(&raw).map_err(|error| {
+                StorageError::Secret(format!("invalid definition id in database: {error}"))
+            })?;
+            ids.push(EntityId::from_uuid(uuid));
+        }
+        Ok(ids)
+    }
+
+    /// Remove a node and everything nested under it.
+    ///
+    /// Definitions are deleted through `delete_definition` first so their cases
+    /// and search rows go with them; this only clears the tree itself.
+    pub fn delete_project_node(
+        &self,
+        project_id: EntityId,
+        id: EntityId,
+    ) -> Result<usize, StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let deleted = transaction.execute(
+            "WITH RECURSIVE descendants(id) AS (
+                 SELECT id FROM project_nodes
+                 WHERE project_id = ?1 AND id = ?2
+                 UNION ALL
+                 SELECT n.id FROM project_nodes n
+                 JOIN descendants d ON n.parent_id = d.id
+                 WHERE n.project_id = ?1
+             )
+             DELETE FROM project_nodes
+             WHERE project_id = ?1 AND id IN (SELECT id FROM descendants)",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(deleted)
+    }
+
+    pub fn delete_scenario(
+        &self,
+        project_id: EntityId,
+        id: EntityId,
+    ) -> Result<bool, StorageError> {
+        let connection = self.connection()?;
+        let deleted = connection.execute(
+            "DELETE FROM scenarios WHERE project_id = ?1 AND id = ?2",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        Ok(deleted > 0)
+    }
+
+    pub fn delete_mock_profile(
+        &self,
+        project_id: EntityId,
+        id: EntityId,
+    ) -> Result<bool, StorageError> {
+        let connection = self.connection()?;
+        let deleted = connection.execute(
+            "DELETE FROM mock_profiles WHERE project_id = ?1 AND id = ?2",
+            params![project_id.to_string(), id.to_string()],
+        )?;
+        Ok(deleted > 0)
+    }
+
     pub fn save_request_case(
         &self,
         project_id: EntityId,
