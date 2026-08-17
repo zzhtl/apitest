@@ -1,3 +1,6 @@
+pub(crate) mod palette;
+pub(crate) mod snippet;
+
 use std::time::Duration;
 
 use apitest_interop::{OpenApiIssueLevel, validate_openapi};

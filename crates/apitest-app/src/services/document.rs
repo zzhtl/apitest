@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use apitest_core::EntityId;
+
 use crate::app::ApiTestApp;
 use crate::environment::EnvironmentDraft;
 use crate::i18n;
@@ -8,6 +10,7 @@ use crate::state::action::ToastKind;
 use crate::state::session::DocumentSession;
 use crate::state::workspace::{Navigation, WorkspaceRequest};
 use crate::workbench::{DocumentId, DocumentKind};
+use std::collections::HashSet;
 
 impl ApiTestApp {
     /// The document whose session owns the response area right now.
@@ -34,6 +37,52 @@ impl ApiTestApp {
             // never drawn, which keeps every caller free of an Option.
             None => &mut self.idle_session,
         }
+    }
+
+    /// Requests matching `query`, from the full-text index plus anything only
+    /// held in memory.
+    ///
+    /// The sidebar used to filter the loaded page in memory, so a project with
+    /// more requests than one page could not find the rest.
+    pub(crate) fn search_hits(&self, query: &str) -> Vec<SearchHit> {
+        const SEARCH_LIMIT: usize = 50;
+        let query = query.trim();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let mut hits = Vec::new();
+        let mut seen = HashSet::new();
+        if let Some(database) = &self.database {
+            match database.search_definitions(self.project.id, query, SEARCH_LIMIT) {
+                Ok(summaries) => {
+                    for summary in summaries {
+                        if seen.insert(summary.id) {
+                            hits.push(SearchHit {
+                                id: summary.id,
+                                name: summary.name,
+                            });
+                        }
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "full-text search failed"),
+            }
+        }
+        // Unsaved edits are not in the index yet, so match them here too.
+        let needle = query.to_lowercase();
+        for request in &self.requests {
+            if hits.len() >= SEARCH_LIMIT {
+                break;
+            }
+            let matches = request.name.to_lowercase().contains(&needle)
+                || request.endpoint().to_lowercase().contains(&needle);
+            if matches && seen.insert(request.id()) {
+                hits.push(SearchHit {
+                    id: request.id(),
+                    name: request.name.clone(),
+                });
+            }
+        }
+        hits
     }
 
     pub(crate) fn tr<'a>(&self, chinese: &'a str, english: &'a str) -> &'a str {
@@ -221,4 +270,10 @@ impl ApiTestApp {
 
 pub(crate) fn document_snapshot(value: &impl Serialize) -> Vec<u8> {
     serde_json::to_vec(value).expect("workspace document should serialize")
+}
+
+/// One row of the request search results.
+pub(crate) struct SearchHit {
+    pub(crate) id: EntityId,
+    pub(crate) name: String,
 }

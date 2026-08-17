@@ -13,7 +13,7 @@ use crate::theme::{self, Palette, UiExt};
 use crate::ui::editors::protocol::{protocol_color, protocol_label};
 use crate::ui::history::history_state_label;
 use crate::ui::request::method_color;
-use crate::ui::widgets::{icon_button, sidebar_header, sidebar_row};
+use crate::ui::widgets::{empty_state, icon_button, sidebar_header, sidebar_row};
 
 impl ApiTestApp {
     pub(crate) fn api_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -80,26 +80,13 @@ impl ApiTestApp {
                                                 .is_some_and(|current| current.id() == request.id())
                                         });
                                         let response = if let Some(request) = request {
-                                            ui.add_sized(
-                                                [ui.available_width(), 34.0],
-                                                egui::Button::new(request_row_text(
-                                                    request, palette,
-                                                ))
-                                                .selected(selected)
-                                                .fill(if selected {
-                                                    palette.primary_soft
-                                                } else {
-                                                    Color32::TRANSPARENT
-                                                })
-                                                .stroke(Stroke::NONE),
+                                            sidebar_row(
+                                                ui,
+                                                selected,
+                                                request_row_text(request, palette),
                                             )
                                         } else {
-                                            ui.add_sized(
-                                                [ui.available_width(), 34.0],
-                                                egui::Button::new(&node.name)
-                                                    .fill(Color32::TRANSPARENT)
-                                                    .stroke(Stroke::NONE),
-                                            )
+                                            sidebar_row(ui, false, node.name.as_str())
                                         };
                                         if response.clicked()
                                             && !selected
@@ -122,23 +109,30 @@ impl ApiTestApp {
                             }
                         }
                     } else {
-                        for request in &self.requests {
-                            if !request.name.to_lowercase().contains(&search)
-                                && !request.endpoint().to_lowercase().contains(&search)
-                                && !protocol_label(request.protocol_kind())
-                                    .to_lowercase()
-                                    .contains(&search)
-                            {
-                                continue;
-                            }
+                        let hits = self.search_hits(&search);
+                        if hits.is_empty() {
+                            empty_state(
+                                ui,
+                                self.tr("没有匹配的接口", "No matching APIs"),
+                                self.tr("换个关键词试试", "Try a different keyword"),
+                            );
+                        }
+                        for hit in &hits {
                             let selected = self
                                 .requests
                                 .get(self.selected)
-                                .is_some_and(|current| current.id() == request.id());
+                                .is_some_and(|current| current.id() == hit.id);
                             let response =
-                                sidebar_row(ui, selected, request_row_text(request, palette));
+                                match self.requests.iter().find(|request| request.id() == hit.id) {
+                                    Some(request) => sidebar_row(
+                                        ui,
+                                        selected,
+                                        request_row_text(request, palette),
+                                    ),
+                                    None => sidebar_row(ui, selected, hit.name.as_str()),
+                                };
                             if response.clicked() && !selected {
-                                selection = Some(request.id());
+                                selection = Some(hit.id);
                             }
                         }
                     }

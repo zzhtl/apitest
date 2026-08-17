@@ -9,7 +9,7 @@ use crate::state::workspace::Navigation;
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, ThemeMode, UiExt};
 use crate::ui::sidebar::protocol_creation_menu;
-use crate::ui::widgets::rail_button;
+use crate::ui::widgets::{icon_button, rail_button};
 
 pub(crate) const SEARCH_FIELD_ID: &str = "global_api_search";
 
@@ -27,8 +27,8 @@ impl ApiTestApp {
             )
         });
         if search {
-            self.navigation = Navigation::Api;
-            context.memory_mut(|memory| memory.request_focus(egui::Id::new(SEARCH_FIELD_ID)));
+            self.show_palette = true;
+            self.palette_query.clear();
         }
         if send && self.navigation == Navigation::Api {
             self.send_current(context);
@@ -41,9 +41,20 @@ impl ApiTestApp {
         }
     }
 
+    pub(crate) fn toggle_theme(&mut self, context: &egui::Context) {
+        self.theme = match self.theme {
+            ThemeMode::Dark => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::Dark,
+        };
+        theme::apply(context, self.theme);
+        let theme = self.theme;
+        self.persist_setting(THEME_SETTING, &theme);
+    }
+
     pub(crate) fn top_bar(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
-        let search_hint = self.tr("搜索接口  Ctrl K", "Search APIs  Ctrl K");
+        let search_hint = self.tr("筛选接口", "Filter APIs");
+        let palette_tip = self.tr("命令面板  Ctrl K", "Command palette  Ctrl K");
         let new_label = self.tr("新建", "New");
         let settings_tip = self.tr("设置", "Settings");
         let theme_tip = self.tr("切换主题", "Toggle theme");
@@ -54,6 +65,7 @@ impl ApiTestApp {
         let mut selected_project = None;
         let mut new_project = false;
         let mut interop_action = None;
+        let mut open_palette = false;
         egui::Frame::new()
             .fill(palette.panel)
             .inner_margin(egui::Margin::symmetric(12, 8))
@@ -93,11 +105,14 @@ impl ApiTestApp {
                         });
                     ui.add_space(8.0);
                     ui.add_sized(
-                        [220.0, 32.0],
+                        [200.0, 32.0],
                         egui::TextEdit::singleline(&mut self.search)
                             .id_source(SEARCH_FIELD_ID)
                             .hint_text(search_hint),
                     );
+                    if icon_button(ui, "search", palette_tip).clicked() {
+                        open_palette = true;
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add_sized(
@@ -230,13 +245,7 @@ impl ApiTestApp {
             self.queue_action(PendingAction::NewProject);
         }
         if toggle_theme {
-            self.theme = match self.theme {
-                ThemeMode::Dark => ThemeMode::Light,
-                ThemeMode::Light => ThemeMode::Dark,
-            };
-            theme::apply(ui.ctx(), self.theme);
-            let theme = self.theme;
-            self.persist_setting(THEME_SETTING, &theme);
+            self.toggle_theme(ui.ctx());
         }
         if show_settings {
             self.show_settings = true;
@@ -248,6 +257,10 @@ impl ApiTestApp {
         }
         if let Some(action) = interop_action {
             self.handle_interop_action(action);
+        }
+        if open_palette {
+            self.show_palette = true;
+            self.palette_query.clear();
         }
     }
 

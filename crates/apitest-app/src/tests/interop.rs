@@ -1,11 +1,13 @@
 use std::time::Duration;
 
+use apitest_core::ApiDefinition;
 use apitest_core::{ApiContract, ProtocolSpec};
+use apitest_interop::CodeLanguage;
 use apitest_storage::{MemorySecretStore, PageRequest};
 use egui_kittest::{Harness, kittest::Queryable as _};
 
 use super::support::test_app;
-use crate::draft::AuthDraft;
+use crate::draft::{AuthDraft, EditablePair};
 use crate::persistence::StorageEvent;
 use crate::state::action::InteropAction;
 use crate::state::workspace::WorkspaceRequest;
@@ -358,4 +360,79 @@ fn imported_authentication_values_are_moved_to_the_secret_store() {
             assert!(!stored.contains(secret), "stored document leaked {secret}");
         }
     }
+}
+
+/// The desktop can reach the code generator that `apitest-interop` has always
+/// exposed; it previously had no call site at all.
+#[test]
+fn code_snippets_cover_every_supported_language() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_eframe(test_app);
+    harness.state_mut().requests[0].draft.url = "https://api.example.com/v1/users".into();
+    harness.state_mut().requests[0]
+        .draft
+        .headers
+        .push(EditablePair::new("X-Trace", "abc"));
+    harness.state_mut().show_snippet = true;
+
+    for language in [
+        CodeLanguage::Curl,
+        CodeLanguage::JavaScriptFetch,
+        CodeLanguage::PythonRequests,
+        CodeLanguage::RustReqwest,
+    ] {
+        harness.state_mut().snippet_language = language;
+        harness.run_steps(2);
+        let spec = match harness.state().requests[0].edited_protocol() {
+            apitest_core::ProtocolSpec::Http(spec) => spec,
+            other => panic!("expected HTTP, got {:?}", other.kind()),
+        };
+        let code = apitest_interop::generate_code(&spec, language);
+        assert!(
+            code.contains("https://api.example.com/v1/users"),
+            "{language:?} snippet should carry the URL: {code}",
+        );
+    }
+}
+
+/// Search must reach requests that are only in the index, not just the page the
+/// sidebar happens to have loaded.
+#[test]
+fn search_finds_requests_that_are_not_loaded_in_memory() {
+    let harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_eframe(test_app);
+    let project_id = harness.state().project.id;
+    let definition = ApiDefinition::new(
+        "订单查询接口",
+        apitest_core::ProtocolSpec::Http(apitest_core::HttpSpec::new(
+            apitest_core::HttpMethod::Get,
+            "https://api.example.com/orders",
+        )),
+    );
+    let stored_id = definition.id;
+    harness
+        .state()
+        .database
+        .as_ref()
+        .expect("database")
+        .save_definition(project_id, &definition)
+        .expect("definition should save");
+
+    // Deliberately not added to `requests`: this is the not-yet-loaded case.
+    assert!(
+        !harness
+            .state()
+            .requests
+            .iter()
+            .any(|request| request.id() == stored_id)
+    );
+
+    let hits = harness.state().search_hits("订单");
+    assert!(
+        hits.iter().any(|hit| hit.id == stored_id),
+        "full-text search should surface the stored definition, got {:?}",
+        hits.iter().map(|hit| &hit.name).collect::<Vec<_>>(),
+    );
 }

@@ -54,6 +54,13 @@ fn render_every_workspace() {
     capture("environment", ThemeMode::Dark, |app| {
         app.navigation = Navigation::Environment;
     });
+    capture("palette", ThemeMode::Dark, |app| {
+        app.show_palette = true;
+    });
+    capture("snippet", ThemeMode::Dark, |app| {
+        app.requests[0].draft.url = "https://api.example.com/v1/users".into();
+        app.show_snippet = true;
+    });
     capture("request-tests", ThemeMode::Dark, |app| {
         app.session_mut().editor_tab = crate::state::workspace::EditorTab::Tests;
         app.requests[0].request_case.assertions = vec![

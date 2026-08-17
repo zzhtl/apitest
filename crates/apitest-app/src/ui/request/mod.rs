@@ -19,7 +19,7 @@ use crate::ui::editors::body::body_editor;
 use crate::ui::editors::editable_pairs;
 use crate::ui::editors::protocol::{protocol_color, protocol_editor, protocol_label};
 use crate::ui::scenario::rules::{assertion_rules_editor, extractor_rules_editor};
-use crate::ui::widgets::{dirty_marker, empty_state_action, tab_button};
+use crate::ui::widgets::{dirty_marker, empty_state_action, icon_button, tab_button};
 
 impl ApiTestApp {
     pub(crate) fn request_workspace(&mut self, ui: &mut egui::Ui) {
@@ -77,6 +77,8 @@ impl ApiTestApp {
         let mut send = false;
         let mut stop = false;
         let mut editor_error = None;
+        let mut show_snippet = false;
+        let snippet_tip = self.tr("生成代码片段", "Generate code snippet");
         let running = self.session().response.is_active();
         let stopping = self.session().response.state == RunState::Cancelling;
         let mut editor_tab = self.session().editor_tab;
@@ -118,6 +120,9 @@ impl ApiTestApp {
                             .clicked()
                         {
                             save = true;
+                        }
+                        if icon_button(ui, "code", snippet_tip).clicked() {
+                            show_snippet = true;
                         }
                     });
                 });
@@ -328,6 +333,9 @@ impl ApiTestApp {
                 self.requests[index].draft.ensure_empty_rows();
             });
         self.session_mut().editor_tab = editor_tab;
+        if show_snippet {
+            self.show_snippet = true;
+        }
         if let Some(error) = editor_error {
             self.toast(ToastKind::Error, error);
         }

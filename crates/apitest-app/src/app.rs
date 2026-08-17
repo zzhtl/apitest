@@ -6,7 +6,7 @@ use std::{
 use apitest_core::{
     EntityId, MockProfile, Project, ProtocolExecutor, ProtocolKind, RunRecord, TestScenario,
 };
-use apitest_interop::OpenApiIssue;
+use apitest_interop::{CodeLanguage, OpenApiIssue};
 use apitest_runtime::{
     ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, ScenarioReport, ScriptEngine,
     WebSocketExecutor,
@@ -92,6 +92,10 @@ pub struct ApiTestApp {
     pub(crate) show_curl_import: bool,
     pub(crate) curl_import_source: String,
     pub(crate) show_openapi_preview: bool,
+    pub(crate) show_snippet: bool,
+    pub(crate) show_palette: bool,
+    pub(crate) palette_query: String,
+    pub(crate) snippet_language: CodeLanguage,
     pub(crate) openapi_preview_tab: OpenApiPreviewTab,
     pub(crate) openapi_source: String,
     pub(crate) openapi_html: String,
@@ -302,6 +306,10 @@ impl ApiTestApp {
             show_curl_import: false,
             curl_import_source: String::new(),
             show_openapi_preview: false,
+            show_snippet: false,
+            show_palette: false,
+            palette_query: String::new(),
+            snippet_language: CodeLanguage::Curl,
             openapi_preview_tab: OpenApiPreviewTab::Yaml,
             openapi_source: String::new(),
             openapi_html: String::new(),
@@ -389,6 +397,10 @@ impl eframe::App for ApiTestApp {
         if self.show_openapi_preview {
             self.openapi_preview_window(ui.ctx());
         }
+        if self.show_snippet {
+            self.snippet_window(ui.ctx());
+        }
+        self.command_palette(ui.ctx());
         self.confirmation_window(ui.ctx());
         self.toast_area(ui.ctx());
     }
