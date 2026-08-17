@@ -11,6 +11,7 @@ use crate::app::ApiTestApp;
 use crate::state::action::{RuntimeMessage, ToastKind};
 use crate::state::response::RunState;
 use crate::state::verification::VerificationOutcome;
+use crate::ui::code::KnownVariables;
 use crate::workbench::DocumentId;
 
 /// The inputs a run needs before it can be judged, gathered on the UI thread so
@@ -49,6 +50,76 @@ impl ApiTestApp {
             }
         }
         variables
+    }
+
+    /// Names the active environment and the selected request can resolve.
+    pub(crate) fn known_variables(&self) -> KnownVariables {
+        let mut names = self
+            .script_variables(self.selected)
+            .into_keys()
+            .collect::<Vec<_>>();
+        // Secrets resolve at send time even though scripts never see them.
+        if let Some(environment) = self
+            .environments
+            .iter()
+            .find(|environment| environment.id() == self.active_environment)
+        {
+            names.extend(
+                environment
+                    .variables
+                    .iter()
+                    .filter(|variable| variable.enabled)
+                    .map(|variable| variable.name.clone()),
+            );
+        }
+        if let Some(request) = self.requests.get(self.selected) {
+            names.extend(
+                request
+                    .request_case
+                    .local_variables
+                    .iter()
+                    .map(|variable| variable.name.clone()),
+            );
+        }
+        KnownVariables::from_names(names)
+    }
+
+    /// The URL as it will actually be sent, plus any names that did not resolve.
+    ///
+    /// Secret values are never substituted here — the preview shows the
+    /// reference so a token cannot end up on screen.
+    pub(crate) fn resolved_url(&self, template: &str) -> (String, Vec<String>) {
+        if !template.contains("{{") {
+            return (template.to_owned(), Vec::new());
+        }
+        let Some(environment) = self
+            .environments
+            .iter()
+            .find(|environment| environment.id() == self.active_environment)
+        else {
+            return (template.to_owned(), Vec::new());
+        };
+        let mut resolvable = environment.to_environment();
+        resolvable.variables = resolvable
+            .variables
+            .iter()
+            .map(|variable| {
+                if variable.is_secret() {
+                    variable.with_materialized_secret("••••••")
+                } else {
+                    variable.clone()
+                }
+            })
+            .collect();
+        let overlays = self
+            .requests
+            .get(self.selected)
+            .map(|request| request.request_case.local_variables.clone())
+            .unwrap_or_default();
+        match resolvable.resolve(template, &overlays) {
+            Ok(resolved) => (resolved.value().to_owned(), resolved.missing().to_vec()),
+            Err(error) => (error.to_string(), Vec::new()),
+        }
     }
 
     /// Run the pre-request script and return the variables it produced.

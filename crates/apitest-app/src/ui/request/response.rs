@@ -8,6 +8,8 @@ use crate::state::response::{ResponseBodyMode, ResponseTab, TimelineEntry, Timel
 use crate::state::verification::VerificationOutcome;
 use crate::theme::tokens::radius;
 use crate::theme::{self, UiExt};
+use crate::ui::code::code_view;
+use crate::ui::json_tree::json_tree;
 use crate::ui::widgets::{Tone, badge, empty_state, icon_button, tab_button};
 
 impl ApiTestApp {
@@ -179,32 +181,81 @@ impl ApiTestApp {
             return;
         }
         let mut mode = self.session().response_body_mode;
+        let mut wrap = self.session().body_wrap;
+        let mut search = self.session().body_search.clone();
         let body = {
             let response = &self.session().response;
             response
                 .pretty_body
                 .as_ref()
-                .filter(|_| mode == ResponseBodyMode::Pretty)
+                .filter(|_| mode != ResponseBodyMode::Raw)
                 .unwrap_or(&response.body)
                 .clone()
         };
+        let looks_like_json = self.session().response.pretty_body.is_some();
+        let mut save = false;
+        let mut matches = 0;
         ui.horizontal(|ui| {
             ui.selectable_value(&mut mode, ResponseBodyMode::Pretty, "Pretty");
             ui.selectable_value(&mut mode, ResponseBodyMode::Raw, "Raw");
+            if looks_like_json {
+                ui.selectable_value(&mut mode, ResponseBodyMode::Tree, self.tr("树形", "Tree"));
+            }
+            ui.separator();
+            ui.add_sized(
+                [180.0, 24.0],
+                egui::TextEdit::singleline(&mut search)
+                    .hint_text(self.tr("在响应中查找", "Find in response")),
+            );
+            if !search.is_empty() {
+                matches = body.to_lowercase().matches(&search.to_lowercase()).count();
+                ui.label(
+                    RichText::new(match self.language {
+                        Language::Chinese => format!("{matches} 处"),
+                        Language::English => format!("{matches} matches"),
+                    })
+                    .small()
+                    .color(if matches == 0 {
+                        palette.warning
+                    } else {
+                        palette.muted
+                    }),
+                );
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(ui, "copy", self.tr("复制响应", "Copy response")).clicked() {
                     ui.ctx().copy_text(body.clone());
                 }
+                if icon_button(ui, "download", self.tr("保存到文件", "Save to file")).clicked()
+                {
+                    save = true;
+                }
+                ui.checkbox(&mut wrap, self.tr("换行", "Wrap"));
             });
         });
-        self.session_mut().response_body_mode = mode;
-        egui::ScrollArea::both().show(ui, |ui| {
-            ui.add(
-                egui::Label::new(RichText::new(&body).monospace().color(palette.text))
-                    .selectable(true)
-                    .wrap_mode(egui::TextWrapMode::Extend),
-            );
-        });
+        {
+            let session = self.session_mut();
+            session.response_body_mode = mode;
+            session.body_wrap = wrap;
+            session.body_search = search.clone();
+        }
+        let syntax = if looks_like_json && mode != ResponseBodyMode::Raw {
+            "json"
+        } else {
+            "txt"
+        };
+        if mode == ResponseBodyMode::Tree
+            && let Ok(document) = serde_json::from_str::<serde_json::Value>(&body)
+        {
+            json_tree(ui, &document, &search);
+        } else {
+            egui::ScrollArea::both().show(ui, |ui| {
+                code_view(ui, &body, syntax, &search, wrap);
+            });
+        }
+        if save {
+            self.export_text("response.txt", "Text", &body);
+        }
         if self.session().response.truncated {
             ui.colored_label(
                 palette.warning,

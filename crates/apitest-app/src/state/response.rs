@@ -18,6 +18,7 @@ pub(crate) enum ResponseBodyMode {
     #[default]
     Pretty,
     Raw,
+    Tree,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -5,6 +5,7 @@ use crate::draft::{BodyMode, EditableMultipartPart, MultipartValueMode, RequestD
 use crate::i18n::{Language, tr};
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, UiExt};
+use crate::ui::code::{KnownVariables, body_syntax, code_editor};
 use crate::ui::editors::editable_pairs;
 use crate::ui::widgets::empty_state;
 
@@ -12,6 +13,7 @@ pub(crate) fn body_editor(
     ui: &mut egui::Ui,
     draft: &mut RequestDraft,
     language: Language,
+    known: &KnownVariables,
 ) -> Option<String> {
     let palette = ui.palette();
     let mut error = None;
@@ -54,13 +56,9 @@ pub(crate) fn body_editor(
     match draft.body_mode {
         BodyMode::None => empty_state(ui, tr(language, "无请求体", "No body"), ""),
         BodyMode::Json | BodyMode::Text | BodyMode::Xml => {
+            let syntax = body_syntax(draft.body_mode);
             egui::ScrollArea::both().show(ui, |ui| {
-                ui.add_sized(
-                    ui.available_size(),
-                    egui::TextEdit::multiline(&mut draft.body)
-                        .code_editor()
-                        .desired_width(f32::INFINITY),
-                );
+                code_editor(ui, &mut draft.body, syntax, known, false);
             });
         }
         BodyMode::FormUrlEncoded => editable_pairs(ui, &mut draft.form_fields, language, false),

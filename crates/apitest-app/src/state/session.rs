@@ -33,6 +33,9 @@ pub(crate) struct DocumentSession {
     pub(crate) history_redactions: Vec<String>,
     /// Assertion and extractor outcome for the most recent run in this tab.
     pub(crate) verification: Option<VerificationOutcome>,
+    /// Response viewer state: search box contents and soft-wrap preference.
+    pub(crate) body_search: String,
+    pub(crate) body_wrap: bool,
 }
 
 impl DocumentSession {

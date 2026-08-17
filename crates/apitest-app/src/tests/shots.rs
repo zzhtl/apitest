@@ -61,6 +61,27 @@ fn render_every_workspace() {
         app.requests[0].draft.url = "https://api.example.com/v1/users".into();
         app.show_snippet = true;
     });
+    capture("body-editor", ThemeMode::Dark, |app| {
+        app.session_mut().editor_tab = crate::state::workspace::EditorTab::Body;
+        app.requests[0].draft.url = "{{base_url}}/users/{{user_id}}".into();
+        app.requests[0].draft.body_mode = crate::draft::BodyMode::Json;
+        app.requests[0].draft.body = "{\n  \"name\": \"{{base_url}}\",\n  \"missing\": \"{{nope}}\",\n  \"count\": 42,\n  \"ok\": true,\n  \"tags\": [\"a\", \"b\"]\n}".into();
+        app.environments[0].set_plain_value("base_url", "https://api.example.com");
+    });
+    capture("response-body", ThemeMode::Dark, |app| {
+        let session = app.session_mut();
+        session.response.status = Some(200);
+        session.response.body = "{\"data\":{\"id\":42,\"name\":\"order\"},\"ok\":true}".into();
+        session.response.finish_body();
+        session.body_search = "order".into();
+    });
+    capture("response-tree", ThemeMode::Dark, |app| {
+        let session = app.session_mut();
+        session.response.status = Some(200);
+        session.response.body = "{\"data\":{\"id\":42,\"name\":\"order\",\"tags\":[\"a\",\"b\"]},\"ok\":true,\"total\":3}".into();
+        session.response.finish_body();
+        session.response_body_mode = crate::state::response::ResponseBodyMode::Tree;
+    });
     capture("request-tests", ThemeMode::Dark, |app| {
         app.session_mut().editor_tab = crate::state::workspace::EditorTab::Tests;
         app.requests[0].request_case.assertions = vec![

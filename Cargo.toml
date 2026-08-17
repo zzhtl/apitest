@@ -27,7 +27,7 @@ csv = "1.3"
 directories = "6.0"
 eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
 egui = "0.35"
-egui_extras = "0.35"
+egui_extras = { version = "0.35", features = ["syntect"] }
 eventsource-stream = "0.2"
 fontdb = "0.24"
 futures = "0.3"

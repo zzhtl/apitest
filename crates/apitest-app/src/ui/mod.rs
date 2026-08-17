@@ -1,6 +1,8 @@
+pub(crate) mod code;
 pub(crate) mod editors;
 pub(crate) mod environment;
 pub(crate) mod history;
+pub(crate) mod json_tree;
 pub(crate) mod mock;
 pub(crate) mod request;
 pub(crate) mod scenario;

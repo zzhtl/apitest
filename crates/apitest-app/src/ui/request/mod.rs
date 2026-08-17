@@ -82,6 +82,7 @@ impl ApiTestApp {
         let running = self.session().response.is_active();
         let stopping = self.session().response.state == RunState::Cancelling;
         let mut editor_tab = self.session().editor_tab;
+        let known = self.known_variables();
         egui::Frame::new()
             .fill(palette.surface)
             .inner_margin(pad::COMPOSER)
@@ -260,6 +261,40 @@ impl ApiTestApp {
                         send = true;
                     }
                 });
+                let (resolved, missing) = self.resolved_url(&self.requests[index].draft.url);
+                if resolved != self.requests[index].draft.url || !missing.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(tr(self.language, "实际请求", "Resolves to"))
+                                .small()
+                                .color(palette.muted),
+                        );
+                        ui.label(
+                            RichText::new(&resolved)
+                                .small()
+                                .monospace()
+                                .color(if missing.is_empty() {
+                                    palette.accent_text
+                                } else {
+                                    palette.danger
+                                }),
+                        );
+                        if !missing.is_empty() {
+                            ui.label(
+                                RichText::new(match self.language {
+                                    Language::Chinese => {
+                                        format!("未定义变量：{}", missing.join(", "))
+                                    }
+                                    Language::English => {
+                                        format!("undefined: {}", missing.join(", "))
+                                    }
+                                })
+                                .small()
+                                .color(palette.danger),
+                            );
+                        }
+                    });
+                }
                 ui.add_space(6.0);
                 editor_tabs(
                     ui,
@@ -281,7 +316,8 @@ impl ApiTestApp {
                         editable_pairs(ui, &mut self.requests[index].draft.cookies, language, true)
                     }
                     EditorTab::Body => {
-                        editor_error = body_editor(ui, &mut self.requests[index].draft, language)
+                        editor_error =
+                            body_editor(ui, &mut self.requests[index].draft, language, &known)
                     }
                     EditorTab::Auth => {
                         editor_error = auth_editor(

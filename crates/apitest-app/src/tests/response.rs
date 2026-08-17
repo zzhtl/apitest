@@ -48,7 +48,12 @@ fn send_flow_reaches_a_completed_response() {
     harness.run_steps(8);
 
     assert!(harness.query_by_label("200").is_some());
-    assert!(harness.query_by_label_contains("中文").is_some());
+    // The body renders in a read-only code view, so it reaches the
+    // accessibility tree as a text field value rather than as a label.
+    assert!(
+        harness.query_all_by_value("中文").next().is_some(),
+        "the response body should be on screen",
+    );
     assert_eq!(harness.state().session().response.body, "中文");
     assert_eq!(
         harness.state().session().response.state,
