@@ -1,9 +1,16 @@
 mod app;
 mod draft;
 mod environment;
+mod i18n;
 mod persistence;
+mod services;
+mod state;
 mod theme;
+mod ui;
 mod workbench;
+
+#[cfg(test)]
+mod tests;
 
 pub use app::ApiTestApp;
 pub use draft::{
