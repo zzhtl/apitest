@@ -106,7 +106,7 @@ fn scenario_runs_from_the_workbench_and_exposes_a_step_report() {
     harness.state_mut().run_current_scenario(&context);
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
-        harness.state_mut().drain_runtime();
+        harness.state_mut().drain_runtime(&context);
         if harness.state().scenario_cancellation.is_none() {
             break;
         }
@@ -251,7 +251,7 @@ fn desktop_mock_configuration_starts_a_server_and_matches_requests() {
     harness.state_mut().start_current_mock(&context);
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
-        harness.state_mut().drain_runtime();
+        harness.state_mut().drain_runtime(&context);
         if harness.state().mock_server.is_some() {
             break;
         }

@@ -8,7 +8,8 @@ use apitest_core::{
 };
 use apitest_interop::OpenApiIssue;
 use apitest_runtime::{
-    ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, ScenarioReport, WebSocketExecutor,
+    ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, ScenarioReport, ScriptEngine,
+    WebSocketExecutor,
 };
 use apitest_storage::{BodyStore, Database, PageRequest, SecretStore, SystemSecretStore};
 use eframe::egui::{self, Stroke};
@@ -45,6 +46,7 @@ pub(crate) const DOCUMENT_TABS_SETTING: &str = "ui.document_tabs";
 pub struct ApiTestApp {
     pub(crate) runtime: Arc<tokio::runtime::Runtime>,
     pub(crate) executors: Arc<ExecutorRegistry>,
+    pub(crate) scripts: ScriptEngine,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) database: Option<Arc<Database>>,
     pub(crate) body_store: Option<BodyStore>,
@@ -251,6 +253,7 @@ impl ApiTestApp {
         Self {
             runtime,
             executors: Arc::new(executors),
+            scripts: ScriptEngine::default(),
             secrets,
             database,
             body_store,
@@ -310,7 +313,7 @@ impl ApiTestApp {
 
 impl eframe::App for ApiTestApp {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain_runtime();
+        self.drain_runtime(context);
         self.drain_storage();
         self.keyboard_shortcuts(context);
         self.schedule_request_autosaves(context);

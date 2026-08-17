@@ -171,6 +171,27 @@ impl EnvironmentDraft {
                 .any(EditableVariable::has_pending_secret)
     }
 
+    /// Set a non-secret variable, adding it if the environment lacks one.
+    ///
+    /// Used by response extractors so the next request can read what the last
+    /// one produced.
+    pub fn set_plain_value(&mut self, name: &str, value: &str) {
+        if let Some(existing) = self
+            .variables
+            .iter_mut()
+            .find(|variable| !variable.secret && variable.name == name)
+        {
+            existing.value = value.to_owned();
+            existing.enabled = true;
+            return;
+        }
+        let mut variable = EditableVariable::empty();
+        variable.name = name.to_owned();
+        variable.value = value.to_owned();
+        self.variables.push(variable);
+        self.ensure_empty_row();
+    }
+
     pub fn ensure_empty_row(&mut self) {
         if self
             .variables

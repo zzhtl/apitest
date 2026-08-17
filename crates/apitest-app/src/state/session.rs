@@ -5,6 +5,7 @@ use apitest_storage::RedactingBodySink;
 use tokio_util::sync::CancellationToken;
 
 use crate::state::response::{ResponseBodyMode, ResponseTab, ResponseView};
+use crate::state::verification::VerificationOutcome;
 use crate::state::workspace::EditorTab;
 use crate::workbench::DocumentId;
 
@@ -30,6 +31,8 @@ pub(crate) struct DocumentSession {
     pub(crate) history_record: Option<RunRecord>,
     pub(crate) history_body: Option<RedactingBodySink>,
     pub(crate) history_redactions: Vec<String>,
+    /// Assertion and extractor outcome for the most recent run in this tab.
+    pub(crate) verification: Option<VerificationOutcome>,
 }
 
 impl DocumentSession {

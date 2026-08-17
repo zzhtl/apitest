@@ -2,12 +2,12 @@ pub(crate) mod response;
 
 use std::sync::Arc;
 
-use apitest_core::{HttpMethod, ProtocolKind};
+use apitest_core::{HttpMethod, ProtocolKind, RequestCase};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 
 use crate::app::ApiTestApp;
 use crate::draft::{ProxyDraft, RequestDraft};
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::state::action::{Confirmation, PendingAction, ToastKind};
 use crate::state::response::RunState;
 use crate::state::workspace::EditorTab;
@@ -18,7 +18,8 @@ use crate::ui::editors::auth::auth_editor;
 use crate::ui::editors::body::body_editor;
 use crate::ui::editors::editable_pairs;
 use crate::ui::editors::protocol::{protocol_color, protocol_editor, protocol_label};
-use crate::ui::widgets::{dirty_marker, empty_state_action};
+use crate::ui::scenario::rules::{assertion_rules_editor, extractor_rules_editor};
+use crate::ui::widgets::{dirty_marker, empty_state_action, tab_button};
 
 impl ApiTestApp {
     pub(crate) fn request_workspace(&mut self, ui: &mut egui::Ui) {
@@ -260,6 +261,7 @@ impl ApiTestApp {
                     &mut editor_tab,
                     self.language,
                     &self.requests[index].draft,
+                    &self.requests[index].request_case,
                 );
                 ui.separator();
                 let language = self.language;
@@ -284,6 +286,43 @@ impl ApiTestApp {
                             Arc::clone(&self.secrets),
                             language,
                         )
+                    }
+                    EditorTab::Tests => {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.label(
+                                RichText::new(tr(language, "断言", "Assertions"))
+                                    .strong()
+                                    .size(14.0),
+                            );
+                            assertion_rules_editor(
+                                ui,
+                                &mut self.requests[index].request_case.assertions,
+                                language,
+                            );
+                            ui.add_space(10.0);
+                            ui.label(
+                                RichText::new(tr(language, "变量提取", "Extractors"))
+                                    .strong()
+                                    .size(14.0),
+                            );
+                            ui.label(
+                                RichText::new(tr(
+                                    language,
+                                    "提取到的值会写入当前环境，供后续请求使用",
+                                    "Extracted values land in the active environment for later requests",
+                                ))
+                                .small()
+                                .color(ui.palette().muted),
+                            );
+                            extractor_rules_editor(
+                                ui,
+                                &mut self.requests[index].request_case.extractors,
+                                language,
+                            );
+                        });
+                    }
+                    EditorTab::Scripts => {
+                        script_editor(ui, &mut self.requests[index].request_case, language);
                     }
                 }
                 self.requests[index].draft.ensure_empty_rows();
@@ -451,44 +490,71 @@ pub(crate) fn editor_tabs(
     selected: &mut EditorTab,
     language: Language,
     draft: &RequestDraft,
+    case: &RequestCase,
 ) {
-    let palette = ui.palette();
     ui.horizontal(|ui| {
         let params = draft.query.iter().filter(|pair| !pair.is_empty()).count();
         let headers = draft.headers.iter().filter(|pair| !pair.is_empty()).count();
         let cookies = draft.cookies.iter().filter(|pair| !pair.is_empty()).count();
+        let checks = case.assertions.len() + case.extractors.len();
+        let scripts = usize::from(!case.pre_request_script.trim().is_empty())
+            + usize::from(!case.post_response_script.trim().is_empty());
         for (tab, chinese, english, count) in [
-            (EditorTab::Params, "参数", "Params", Some(params)),
-            (EditorTab::Headers, "请求头", "Headers", Some(headers)),
-            (EditorTab::Cookies, "Cookie", "Cookies", Some(cookies)),
-            (EditorTab::Body, "请求体", "Body", None),
-            (EditorTab::Auth, "认证", "Auth", None),
+            (EditorTab::Params, "参数", "Params", params),
+            (EditorTab::Headers, "请求头", "Headers", headers),
+            (EditorTab::Cookies, "Cookie", "Cookies", cookies),
+            (EditorTab::Body, "请求体", "Body", 0),
+            (EditorTab::Auth, "认证", "Auth", 0),
+            (EditorTab::Tests, "测试", "Tests", checks),
+            (EditorTab::Scripts, "脚本", "Scripts", scripts),
         ] {
-            let label = match language {
-                Language::Chinese => chinese,
-                Language::English => english,
+            let label = tr(language, chinese, english);
+            let label = if count > 0 {
+                format!("{label} {count}")
+            } else {
+                label.to_owned()
             };
-            let label = count
-                .filter(|count| *count > 0)
-                .map(|count| format!("{label} {count}"))
-                .unwrap_or_else(|| label.to_owned());
-            let response = ui.add(
-                egui::Button::new(RichText::new(label).color(if *selected == tab {
-                    palette.accent_text
-                } else {
-                    palette.muted
-                }))
-                .frame(false),
-            );
-            if *selected == tab {
-                ui.painter().line_segment(
-                    [response.rect.left_bottom(), response.rect.right_bottom()],
-                    Stroke::new(2.0, palette.primary),
-                );
-            }
-            if response.clicked() {
+            if tab_button(ui, *selected == tab, &label).clicked() {
                 *selected = tab;
             }
+        }
+    });
+}
+
+/// Pre-request and post-response script editors.
+fn script_editor(ui: &mut egui::Ui, case: &mut RequestCase, language: Language) {
+    let palette = ui.palette();
+    let available = ui.available_height();
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for (title, hint, script) in [
+            (
+                tr(language, "前置脚本", "Pre-request script"),
+                tr(
+                    language,
+                    "发送前执行，可用 apitest.setVariable(name, value) 写入局部变量",
+                    "Runs before sending; use apitest.setVariable(name, value) to set locals",
+                ),
+                &mut case.pre_request_script,
+            ),
+            (
+                tr(language, "后置脚本", "Post-response script"),
+                tr(
+                    language,
+                    "收到响应后执行，可通过 apitest.assert(name, condition) 断言",
+                    "Runs after the response; assert with apitest.assert(name, condition)",
+                ),
+                &mut case.post_response_script,
+            ),
+        ] {
+            ui.label(RichText::new(title).strong().size(14.0));
+            ui.label(RichText::new(hint).small().color(palette.muted));
+            ui.add_sized(
+                [ui.available_width(), (available / 2.0 - 60.0).max(90.0)],
+                egui::TextEdit::multiline(script)
+                    .code_editor()
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(10.0);
         }
     });
 }

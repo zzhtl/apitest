@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use apitest_core::{EntityId, ExecutionError, ExecutionEvent, ProtocolKind};
 use apitest_runtime::{MockServer, ScenarioReport};
 
+use crate::state::verification::VerificationOutcome;
 use crate::state::workspace::Navigation;
 use crate::workbench::DocumentId;
 
@@ -31,6 +32,8 @@ pub(crate) enum InteropAction {
 pub(crate) enum RuntimeMessage {
     Event(u64, Result<ExecutionEvent, ExecutionError>),
     Closed(u64),
+    /// Boxed: the outcome is far larger than the other variants.
+    Verified(u64, Box<VerificationOutcome>),
     ScenarioFinished(u64, Result<ScenarioReport, String>),
     MockStarted(u64, Result<MockServer, String>),
 }

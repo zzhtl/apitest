@@ -10,6 +10,7 @@ pub(crate) enum ResponseTab {
     Body,
     Headers,
     Timeline,
+    Tests,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]

@@ -54,4 +54,18 @@ fn render_every_workspace() {
     capture("environment", ThemeMode::Dark, |app| {
         app.navigation = Navigation::Environment;
     });
+    capture("request-tests", ThemeMode::Dark, |app| {
+        app.session_mut().editor_tab = crate::state::workspace::EditorTab::Tests;
+        app.requests[0].request_case.assertions = vec![
+            apitest_core::AssertionRule::Status { expected: 200 },
+            apitest_core::AssertionRule::JsonPathEquals {
+                path: "$.data.id".into(),
+                expected: "42".into(),
+            },
+        ];
+        app.requests[0].request_case.extractors = vec![apitest_core::ExtractorRule {
+            name: "token".into(),
+            source: apitest_core::VariableSource::JsonPath("$.token".into()),
+        }];
+    });
 }

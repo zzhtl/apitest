@@ -29,6 +29,8 @@ pub(crate) enum EditorTab {
     Cookies,
     Body,
     Auth,
+    Tests,
+    Scripts,
 }
 
 #[derive(Default)]

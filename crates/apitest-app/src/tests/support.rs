@@ -10,7 +10,7 @@ use apitest_core::{
     Environment, ExecutionEvent, ExecutionMetrics, ExecutionRequest, ExecutionStream,
     ProtocolExecutor, ProtocolKind, ResponseHead,
 };
-use apitest_runtime::ExecutorRegistry;
+use apitest_runtime::{ExecutorRegistry, ScriptEngine};
 use apitest_storage::{Database, MemorySecretStore, SecretStore};
 use chrono::Utc;
 use futures::stream;
@@ -31,6 +31,47 @@ use crate::workbench::{DocumentId, DocumentKind, DocumentTabs};
 pub(super) struct FakeExecutor;
 
 pub(super) struct HistoryExecutor;
+
+/// Streams a small JSON document so assertions and extractors have something
+/// real to work on.
+pub(super) struct JsonExecutor;
+
+impl ProtocolExecutor for JsonExecutor {
+    fn kind(&self) -> ProtocolKind {
+        ProtocolKind::Http
+    }
+
+    fn execute(
+        &self,
+        request: ExecutionRequest,
+        _cancellation: CancellationToken,
+    ) -> ExecutionStream {
+        let mut headers = IndexMap::new();
+        headers.insert(
+            "content-type".to_owned(),
+            vec!["application/json".to_owned()],
+        );
+        Box::pin(stream::iter([
+            Ok(ExecutionEvent::Started {
+                id: request.id,
+                at: Utc::now(),
+            }),
+            Ok(ExecutionEvent::ResponseHead(ResponseHead {
+                status: Some(200),
+                version: Some("HTTP/1.1".into()),
+                headers,
+            })),
+            Ok(ExecutionEvent::Data(
+                br#"{"token":"abc123","count":2}"#.to_vec().into(),
+            )),
+            Ok(ExecutionEvent::Completed(ExecutionMetrics {
+                elapsed_ms: 5,
+                received_bytes: 28,
+                sent_bytes: 0,
+            })),
+        ]))
+    }
+}
 
 impl ProtocolExecutor for HistoryExecutor {
     fn kind(&self) -> ProtocolKind {
@@ -175,6 +216,7 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
     ApiTestApp {
         runtime,
         executors: Arc::new(executors),
+        scripts: ScriptEngine::default(),
         secrets,
         database: Some(database),
         body_store: None,

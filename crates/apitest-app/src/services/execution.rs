@@ -146,8 +146,19 @@ impl ApiTestApp {
             session.response = ResponseView::running();
             session.response_tab = ResponseTab::Body;
             session.response_body_mode = ResponseBodyMode::Pretty;
+            session.verification = None;
         }
 
+        let script_variables = match self.run_pre_request_script(self.selected) {
+            Ok(variables) => variables,
+            Err(error) => {
+                let session = self.sessions.entry(document);
+                session.response = ResponseView::default();
+                session.run = 0;
+                self.toast(ToastKind::Error, error);
+                return;
+            }
+        };
         let redactions = self.history_redaction_values(self.selected, active_index);
         let request_case_id = self.requests[self.selected].request_case.id;
         let mut request = ExecutionRequest::new(
@@ -159,6 +170,7 @@ impl ApiTestApp {
             .request_case
             .local_variables
             .clone();
+        request.local_variables.extend(script_variables);
         let handle = match self.executors.start(request) {
             Ok(handle) => handle,
             Err(error) => {
@@ -255,14 +267,15 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn drain_runtime(&mut self) {
+    pub(crate) fn drain_runtime(&mut self, context: &egui::Context) {
         while let Ok(message) = self.receiver.try_recv() {
             match message {
                 RuntimeMessage::Event(run, event) => {
                     if let Some(document) = self.sessions.owner(run) {
-                        self.apply_runtime_event(document, event);
+                        self.apply_runtime_event(document, event, context);
                     }
                 }
+                RuntimeMessage::Verified(run, outcome) => self.apply_verification(run, *outcome),
                 RuntimeMessage::Closed(run) => {
                     let Some(document) = self.sessions.owner(run) else {
                         continue;
@@ -345,6 +358,7 @@ impl ApiTestApp {
         &mut self,
         document: DocumentId,
         event: Result<ExecutionEvent, ExecutionError>,
+        context: &egui::Context,
     ) {
         match event {
             Ok(ExecutionEvent::Started { .. }) => {}
@@ -376,6 +390,8 @@ impl ApiTestApp {
                 session.cancellation = None;
                 session.execution_commands = None;
                 self.finish_run_history(document, HistoryRunState::Passed, Some(metrics), None);
+                let run = self.sessions.entry(document).run;
+                self.spawn_verification(document, run, context);
             }
             Err(ExecutionError::Cancelled) => {
                 let session = self.sessions.entry(document);

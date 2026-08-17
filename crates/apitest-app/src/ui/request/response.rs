@@ -5,6 +5,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::state::response::{ResponseBodyMode, ResponseTab, TimelineEntry, TimelinePhase};
+use crate::state::verification::VerificationOutcome;
 use crate::theme::tokens::radius;
 use crate::theme::{self, UiExt};
 use crate::ui::widgets::{Tone, badge, empty_state, icon_button, tab_button};
@@ -18,12 +19,25 @@ impl ApiTestApp {
             .is_some_and(|request| request.protocol_kind() == ProtocolKind::WebSocket);
         let mut selected_tab = self.session().response_tab;
         ui.horizontal(|ui| {
+            let checks = self
+                .session()
+                .verification
+                .as_ref()
+                .map(|outcome| outcome.assertions.len())
+                .unwrap_or_default();
             for (tab, chinese, english) in [
                 (ResponseTab::Body, "响应体", "Body"),
                 (ResponseTab::Headers, "响应头", "Headers"),
                 (ResponseTab::Timeline, "时间线", "Timeline"),
+                (ResponseTab::Tests, "测试结果", "Tests"),
             ] {
-                if tab_button(ui, selected_tab == tab, self.tr(chinese, english)).clicked() {
+                let label = self.tr(chinese, english);
+                let label = if tab == ResponseTab::Tests && checks > 0 {
+                    format!("{label} {checks}")
+                } else {
+                    label.to_owned()
+                };
+                if tab_button(ui, selected_tab == tab, &label).clicked() {
                     selected_tab = tab;
                 }
             }
@@ -74,6 +88,10 @@ impl ApiTestApp {
             ResponseTab::Timeline => {
                 let timeline = self.session().response.timeline.clone();
                 response_timeline(ui, &timeline, self.language);
+            }
+            ResponseTab::Tests => {
+                let outcome = self.session().verification.clone();
+                verification_view(ui, outcome.as_ref(), self.language);
             }
         }
     }
@@ -263,4 +281,62 @@ pub(crate) fn status_tone(status: u16) -> Tone {
         400..=499 => Tone::Warning,
         _ => Tone::Danger,
     }
+}
+
+/// Assertion results and extracted variables for the most recent run.
+fn verification_view(ui: &mut egui::Ui, outcome: Option<&VerificationOutcome>, language: Language) {
+    let palette = ui.palette();
+    let Some(outcome) = outcome.filter(|outcome| !outcome.is_empty()) else {
+        empty_state(
+            ui,
+            tr(language, "暂无测试结果", "No test results"),
+            tr(
+                language,
+                "在“测试”标签配置断言或提取器后，发送请求即可看到结果",
+                "Add assertions or extractors in the Tests tab, then send the request",
+            ),
+        );
+        return;
+    };
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        if let Some(error) = &outcome.error {
+            ui.colored_label(palette.danger, error);
+            ui.add_space(6.0);
+        }
+        for assertion in &outcome.assertions {
+            ui.horizontal(|ui| {
+                badge(
+                    ui,
+                    tr(
+                        language,
+                        if assertion.passed { "通过" } else { "失败" },
+                        if assertion.passed { "Pass" } else { "Fail" },
+                    ),
+                    if assertion.passed {
+                        Tone::Success
+                    } else {
+                        Tone::Danger
+                    },
+                );
+                ui.label(&assertion.name);
+                if let Some(error) = &assertion.error {
+                    ui.label(RichText::new(error).small().color(palette.danger));
+                }
+            });
+        }
+        if !outcome.extracted.is_empty() {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(tr(language, "提取的变量", "Extracted variables"))
+                    .strong()
+                    .size(14.0),
+            );
+            for (name, value) in &outcome.extracted {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(name).monospace().strong());
+                    ui.label(RichText::new(value).monospace().color(palette.muted));
+                });
+            }
+        }
+    });
 }
