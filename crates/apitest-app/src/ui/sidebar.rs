@@ -7,13 +7,14 @@ use crate::services::document::document_snapshot;
 use crate::services::history::{HISTORY_MAX_AGE_DAYS, HISTORY_MAX_RECORDS};
 use crate::state::action::PendingAction;
 use crate::state::workspace::{ResourceRow, WorkspaceRequest};
-use crate::theme::{self, Palette};
+use crate::theme::{self, Palette, UiExt};
 use crate::ui::editors::protocol::{protocol_color, protocol_label};
 use crate::ui::history::history_state_label;
 use crate::ui::request::method_color;
 
 impl ApiTestApp {
-    pub(crate) fn api_sidebar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn api_sidebar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let mut new_protocol = None;
         let mut selection = None;
         let mut toggle_resource = None;
@@ -170,7 +171,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn scenario_sidebar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn scenario_sidebar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let mut select = None;
         let mut create = false;
         egui::Frame::new()
@@ -218,7 +220,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn mock_sidebar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn mock_sidebar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let mut select = None;
         let mut create = false;
         egui::Frame::new()
@@ -266,7 +269,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn history_sidebar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn history_sidebar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let mut selection = None;
         let mut refresh = false;
         egui::Frame::new()
@@ -340,7 +344,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn environment_sidebar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn environment_sidebar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let mut new_environment = false;
         let mut selection = None;
         egui::Frame::new()

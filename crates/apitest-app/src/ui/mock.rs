@@ -5,12 +5,13 @@ use eframe::egui::{self, RichText};
 use crate::app::ApiTestApp;
 use crate::i18n::Language;
 use crate::state::action::PendingAction;
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 use crate::ui::request::method_combo;
 use crate::ui::widgets::empty_state;
 
 impl ApiTestApp {
-    pub(crate) fn mock_workspace(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn mock_workspace(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         if self.mock_profiles.get(self.selected_mock).is_none() {
             empty_state(
                 ui,
@@ -19,7 +20,6 @@ impl ApiTestApp {
                     "新建 Mock 后可从 API 契约智能生成响应",
                     "Create a mock to generate responses from API contracts",
                 ),
-                palette,
             );
             if ui.button(self.tr("新建 Mock", "New mock")).clicked() {
                 self.perform_action(PendingAction::NewMock);
@@ -121,7 +121,7 @@ impl ApiTestApp {
                 });
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    mock_rules_editor(ui, &mut profile.rules, self.language, palette, running);
+                    mock_rules_editor(ui, &mut profile.rules, self.language, running);
                 });
             });
         if save {
@@ -143,9 +143,9 @@ pub(crate) fn mock_rules_editor(
     ui: &mut egui::Ui,
     rules: &mut Vec<MockRule>,
     language: Language,
-    palette: Palette,
     running: bool,
 ) {
+    let palette = ui.palette();
     if running {
         ui.label(
             RichText::new(match language {
@@ -201,7 +201,7 @@ pub(crate) fn mock_rules_editor(
                             );
                         });
                         ui.horizontal(|ui| {
-                            method_combo(ui, &mut rule.method, palette);
+                            method_combo(ui, &mut rule.method);
                             ui.add(
                                 egui::TextEdit::singleline(&mut rule.path)
                                     .hint_text("/users/{id}")
@@ -221,7 +221,7 @@ pub(crate) fn mock_rules_editor(
                                     })
                                     .strong(),
                                 );
-                                mock_key_value_editor(ui, &mut rule.query, language, palette);
+                                mock_key_value_editor(ui, &mut rule.query, language);
                                 ui.label(
                                     RichText::new(match language {
                                         Language::Chinese => "请求头",
@@ -229,7 +229,7 @@ pub(crate) fn mock_rules_editor(
                                     })
                                     .strong(),
                                 );
-                                mock_key_value_editor(ui, &mut rule.headers, language, palette);
+                                mock_key_value_editor(ui, &mut rule.headers, language);
                                 let mut path_variables = rule
                                     .path_variables
                                     .iter()
@@ -242,7 +242,7 @@ pub(crate) fn mock_rules_editor(
                                     })
                                     .strong(),
                                 );
-                                string_pair_editor(ui, &mut path_variables, language, palette);
+                                string_pair_editor(ui, &mut path_variables, language);
                                 rule.path_variables = path_variables.into_iter().collect();
                                 let mut body_contains =
                                     rule.body_contains.clone().unwrap_or_default();
@@ -292,12 +292,7 @@ pub(crate) fn mock_rules_editor(
                                     })
                                     .strong(),
                                 );
-                                mock_key_value_editor(
-                                    ui,
-                                    &mut rule.response.headers,
-                                    language,
-                                    palette,
-                                );
+                                mock_key_value_editor(ui, &mut rule.response.headers, language);
                                 ui.label(
                                     RichText::new(match language {
                                         Language::Chinese => "响应正文",
@@ -365,8 +360,8 @@ pub(crate) fn mock_key_value_editor(
     ui: &mut egui::Ui,
     values: &mut Vec<KeyValue>,
     language: Language,
-    palette: Palette,
 ) {
+    let palette = ui.palette();
     let mut remove = None;
     for (index, value) in values.iter_mut().enumerate() {
         ui.push_id(("mock_pair", index), |ui| {
@@ -421,8 +416,8 @@ pub(crate) fn string_pair_editor(
     ui: &mut egui::Ui,
     values: &mut Vec<(String, String)>,
     language: Language,
-    palette: Palette,
 ) {
+    let palette = ui.palette();
     let mut remove = None;
     for (index, (name, value)) in values.iter_mut().enumerate() {
         ui.push_id(("string_pair", index), |ui| {

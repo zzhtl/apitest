@@ -1,13 +1,9 @@
 use eframe::egui::{self, RichText, Stroke};
 
-use crate::theme::Palette;
+use crate::theme::UiExt;
 
-pub(crate) fn tab_button(
-    ui: &mut egui::Ui,
-    selected: bool,
-    label: &str,
-    palette: Palette,
-) -> egui::Response {
+pub(crate) fn tab_button(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
+    let palette = ui.palette();
     let response = ui.add(
         egui::Button::new(RichText::new(label).color(if selected {
             palette.accent_text
@@ -35,7 +31,8 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     }
 }
 
-pub(crate) fn empty_state(ui: &mut egui::Ui, title: &str, description: &str, palette: Palette) {
+pub(crate) fn empty_state(ui: &mut egui::Ui, title: &str, description: &str) {
+    let palette = ui.palette();
     ui.vertical_centered(|ui| {
         ui.add_space(24.0);
         ui.label(RichText::new(title).strong().size(14.0));

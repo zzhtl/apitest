@@ -2,14 +2,14 @@ use apitest_core::{AssertionRule, ExtractorRule, VariableSource};
 use eframe::egui::{self, RichText};
 
 use crate::i18n::Language;
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 
 pub(crate) fn assertion_rules_editor(
     ui: &mut egui::Ui,
     rules: &mut Vec<AssertionRule>,
     language: Language,
-    palette: Palette,
 ) {
+    let palette = ui.palette();
     let mut remove = None;
     for (index, rule) in rules.iter_mut().enumerate() {
         ui.push_id(("assertion", index), |ui| {
@@ -181,8 +181,8 @@ pub(crate) fn extractor_rules_editor(
     ui: &mut egui::Ui,
     rules: &mut Vec<ExtractorRule>,
     language: Language,
-    palette: Palette,
 ) {
+    let palette = ui.palette();
     let mut remove = None;
     for (index, rule) in rules.iter_mut().enumerate() {
         ui.push_id(("extractor", index), |ui| {

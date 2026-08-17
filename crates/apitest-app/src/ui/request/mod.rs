@@ -11,14 +11,15 @@ use crate::i18n::Language;
 use crate::state::action::{Confirmation, PendingAction, ToastKind};
 use crate::state::response::RunState;
 use crate::state::workspace::EditorTab;
-use crate::theme::{self, Palette};
+use crate::theme::{self, Palette, UiExt};
 use crate::ui::editors::auth::auth_editor;
 use crate::ui::editors::body::body_editor;
 use crate::ui::editors::editable_pairs;
 use crate::ui::editors::protocol::{protocol_color, protocol_editor, protocol_label};
 
 impl ApiTestApp {
-    pub(crate) fn request_workspace(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn request_workspace(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         if self.requests.get(self.selected).is_none() {
             ui.centered_and_justified(|ui| {
                 if ui
@@ -45,18 +46,19 @@ impl ApiTestApp {
                     .fill(palette.surface)
                     .stroke(Stroke::new(1.0, palette.divider)),
             )
-            .show(ui, |ui| self.request_composer(ui, palette));
+            .show(ui, |ui| self.request_composer(ui));
         egui::Frame::new()
             .fill(palette.surface)
             .inner_margin(egui::Margin::symmetric(16, 10))
-            .show(ui, |ui| self.response_panel(ui, palette));
+            .show(ui, |ui| self.response_panel(ui));
     }
 
-    pub(crate) fn request_composer(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn request_composer(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         ui.set_min_size(ui.available_size());
         let index = self.selected;
         if self.requests[index].alternate_protocol.is_some() {
-            self.protocol_request_composer(ui, palette);
+            self.protocol_request_composer(ui);
             return;
         }
         let request_id = self.requests[index].id();
@@ -116,7 +118,7 @@ impl ApiTestApp {
                 });
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    method_combo(ui, &mut self.requests[index].draft.method, palette);
+                    method_combo(ui, &mut self.requests[index].draft.method);
                     let reserved = 44.0 + 96.0 + 16.0;
                     let url_width = (ui.available_width() - reserved).max(180.0);
                     ui.add_sized(
@@ -255,35 +257,21 @@ impl ApiTestApp {
                     &mut self.editor_tab,
                     self.language,
                     &self.requests[index].draft,
-                    palette,
                 );
                 ui.separator();
                 let language = self.language;
                 match self.editor_tab {
-                    EditorTab::Params => editable_pairs(
-                        ui,
-                        &mut self.requests[index].draft.query,
-                        language,
-                        palette,
-                        true,
-                    ),
-                    EditorTab::Headers => editable_pairs(
-                        ui,
-                        &mut self.requests[index].draft.headers,
-                        language,
-                        palette,
-                        true,
-                    ),
-                    EditorTab::Cookies => editable_pairs(
-                        ui,
-                        &mut self.requests[index].draft.cookies,
-                        language,
-                        palette,
-                        true,
-                    ),
+                    EditorTab::Params => {
+                        editable_pairs(ui, &mut self.requests[index].draft.query, language, true)
+                    }
+                    EditorTab::Headers => {
+                        editable_pairs(ui, &mut self.requests[index].draft.headers, language, true)
+                    }
+                    EditorTab::Cookies => {
+                        editable_pairs(ui, &mut self.requests[index].draft.cookies, language, true)
+                    }
                     EditorTab::Body => {
-                        editor_error =
-                            body_editor(ui, &mut self.requests[index].draft, language, palette)
+                        editor_error = body_editor(ui, &mut self.requests[index].draft, language)
                     }
                     EditorTab::Auth => {
                         editor_error = auth_editor(
@@ -292,7 +280,6 @@ impl ApiTestApp {
                             request_id,
                             Arc::clone(&self.secrets),
                             language,
-                            palette,
                         )
                     }
                 }
@@ -315,7 +302,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn protocol_request_composer(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn protocol_request_composer(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let index = self.selected;
         let request_id = self.requests[index].id();
         let kind = self.requests[index].protocol_kind();
@@ -399,7 +387,7 @@ impl ApiTestApp {
                 });
                 ui.separator();
                 if let Some(protocol) = self.requests[index].alternate_protocol.as_mut() {
-                    protocol_editor(ui, protocol, self.language, palette);
+                    protocol_editor(ui, protocol, self.language);
                 }
             });
         if save {
@@ -417,7 +405,8 @@ impl ApiTestApp {
     }
 }
 
-pub(crate) fn method_combo(ui: &mut egui::Ui, method: &mut HttpMethod, palette: Palette) {
+pub(crate) fn method_combo(ui: &mut egui::Ui, method: &mut HttpMethod) {
+    let palette = ui.palette();
     egui::ComboBox::from_id_salt("http_method")
         .selected_text(
             RichText::new(method.to_string())
@@ -457,8 +446,8 @@ pub(crate) fn editor_tabs(
     selected: &mut EditorTab,
     language: Language,
     draft: &RequestDraft,
-    palette: Palette,
 ) {
+    let palette = ui.palette();
     ui.horizontal(|ui| {
         let params = draft.query.iter().filter(|pair| !pair.is_empty()).count();
         let headers = draft.headers.iter().filter(|pair| !pair.is_empty()).count();

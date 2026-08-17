@@ -8,10 +8,11 @@ use crate::app::ApiTestApp;
 use crate::environment::EnvironmentDraft;
 use crate::i18n::Language;
 use crate::state::action::{Confirmation, ToastKind};
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 
 impl ApiTestApp {
-    pub(crate) fn environment_workspace(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn environment_workspace(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let Some(environment) = self.environments.get(self.selected_environment) else {
             return;
         };
@@ -81,7 +82,6 @@ impl ApiTestApp {
                     &mut self.environments[self.selected_environment],
                     Arc::clone(&self.secrets),
                     self.language,
-                    palette,
                 );
             });
         if let Some(error) = variable_error {
@@ -101,8 +101,8 @@ pub(crate) fn variable_table(
     environment: &mut EnvironmentDraft,
     secrets: Arc<dyn SecretStore>,
     language: Language,
-    palette: Palette,
 ) -> Option<String> {
+    let palette = ui.palette();
     let labels = match language {
         Language::Chinese => ("名称", "值", "类型", "普通", "密钥"),
         Language::English => ("Name", "Value", "Type", "Plain", "Secret"),

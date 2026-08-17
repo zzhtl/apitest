@@ -3,11 +3,12 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::app::ApiTestApp;
 use crate::i18n::Language;
-use crate::theme::Palette;
+use crate::theme::{Palette, UiExt};
 use crate::ui::widgets::{empty_state, format_bytes};
 
 impl ApiTestApp {
-    pub(crate) fn history_workspace(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn history_workspace(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let Some(record) = self.run_records.get(self.selected_history).cloned() else {
             empty_state(
                 ui,
@@ -16,7 +17,6 @@ impl ApiTestApp {
                     "发送请求后会在本地保存脱敏的执行记录",
                     "Run a request to save a redacted local record",
                 ),
-                palette,
             );
             return;
         };
@@ -48,25 +48,21 @@ impl ApiTestApp {
                             .status_code
                             .map(|status| status.to_string())
                             .unwrap_or_else(|| "—".into()),
-                        palette,
                     );
                     history_metric(
                         ui,
                         self.tr("耗时", "Elapsed"),
                         format!("{} ms", record.elapsed_ms),
-                        palette,
                     );
                     history_metric(
                         ui,
                         self.tr("响应大小", "Response size"),
                         format_bytes(record.response_bytes),
-                        palette,
                     );
                     history_metric(
                         ui,
                         self.tr("开始时间", "Started"),
                         record.started_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-                        palette,
                     );
                 });
                 if let Some(error) = &record.error {
@@ -82,7 +78,7 @@ impl ApiTestApp {
                     );
                 });
                 if record.body_path.is_none() {
-                    empty_state(ui, self.tr("没有响应正文", "No response body"), "", palette);
+                    empty_state(ui, self.tr("没有响应正文", "No response body"), "");
                 } else {
                     egui::ScrollArea::both().show(ui, |ui| {
                         ui.add(
@@ -131,7 +127,8 @@ pub(crate) fn history_state_color(state: HistoryRunState, palette: Palette) -> C
     }
 }
 
-pub(crate) fn history_metric(ui: &mut egui::Ui, label: &str, value: String, palette: Palette) {
+pub(crate) fn history_metric(ui: &mut egui::Ui, label: &str, value: String) {
+    let palette = ui.palette();
     ui.group(|ui| {
         ui.label(RichText::new(label).small().color(palette.muted));
         ui.label(RichText::new(value).strong());

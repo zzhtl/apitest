@@ -32,7 +32,7 @@ use crate::state::action::{
 };
 use crate::state::response::{ResponseBodyMode, ResponseTab, ResponseView};
 use crate::state::workspace::{EditorTab, Navigation, ResourcePage, WorkspaceRequest};
-use crate::theme::{self, Palette, ThemeMode};
+use crate::theme::{self, ThemeMode, UiExt};
 use crate::workbench::{DocumentKind, DocumentTabs};
 
 pub(crate) const THEME_SETTING: &str = "ui.theme";
@@ -333,7 +333,7 @@ impl eframe::App for ApiTestApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let palette = Palette::for_mode(self.theme);
+        let palette = ui.palette();
         egui::Panel::top("top_bar")
             .exact_size(48.0)
             .frame(
@@ -341,7 +341,7 @@ impl eframe::App for ApiTestApp {
                     .fill(palette.panel)
                     .stroke(Stroke::new(1.0, palette.divider)),
             )
-            .show(ui, |ui| self.top_bar(ui, palette));
+            .show(ui, |ui| self.top_bar(ui));
         egui::Panel::left("activity")
             .exact_size(60.0)
             .resizable(false)
@@ -350,7 +350,7 @@ impl eframe::App for ApiTestApp {
                     .fill(palette.rail_bg)
                     .stroke(Stroke::new(1.0, palette.divider)),
             )
-            .show(ui, |ui| self.activity_bar(ui, palette));
+            .show(ui, |ui| self.activity_bar(ui));
         egui::Panel::left("sidebar")
             .default_size(252.0)
             .min_size(220.0)
@@ -361,22 +361,22 @@ impl eframe::App for ApiTestApp {
                     .stroke(Stroke::new(1.0, palette.divider)),
             )
             .show(ui, |ui| match self.navigation {
-                Navigation::Api => self.api_sidebar(ui, palette),
-                Navigation::Scenario => self.scenario_sidebar(ui, palette),
-                Navigation::Mock => self.mock_sidebar(ui, palette),
-                Navigation::History => self.history_sidebar(ui, palette),
-                Navigation::Environment => self.environment_sidebar(ui, palette),
+                Navigation::Api => self.api_sidebar(ui),
+                Navigation::Scenario => self.scenario_sidebar(ui),
+                Navigation::Mock => self.mock_sidebar(ui),
+                Navigation::History => self.history_sidebar(ui),
+                Navigation::Environment => self.environment_sidebar(ui),
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(palette.surface))
             .show(ui, |ui| {
-                self.document_tab_bar(ui, palette);
+                self.document_tab_bar(ui);
                 match self.navigation {
-                    Navigation::Api => self.request_workspace(ui, palette),
-                    Navigation::Scenario => self.scenario_workspace(ui, palette),
-                    Navigation::Mock => self.mock_workspace(ui, palette),
-                    Navigation::History => self.history_workspace(ui, palette),
-                    Navigation::Environment => self.environment_workspace(ui, palette),
+                    Navigation::Api => self.request_workspace(ui),
+                    Navigation::Scenario => self.scenario_workspace(ui),
+                    Navigation::Mock => self.mock_workspace(ui),
+                    Navigation::History => self.history_workspace(ui),
+                    Navigation::Environment => self.environment_workspace(ui),
                 }
             });
 

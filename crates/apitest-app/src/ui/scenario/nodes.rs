@@ -2,7 +2,7 @@ use apitest_core::{EntityId, ScenarioNode};
 use eframe::egui::{self, CornerRadius, RichText, Stroke};
 
 use crate::i18n::Language;
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 use crate::ui::scenario::rules::{assertion_rules_editor, extractor_rules_editor};
 
 pub(crate) fn scenario_nodes_editor(
@@ -10,9 +10,9 @@ pub(crate) fn scenario_nodes_editor(
     nodes: &mut Vec<ScenarioNode>,
     request_options: &[(EntityId, String)],
     language: Language,
-    palette: Palette,
     depth: usize,
 ) {
+    let palette = ui.palette();
     let mut remove = None;
     for (index, node) in nodes.iter_mut().enumerate() {
         ui.push_id(("scenario_node", depth, index), |ui| {
@@ -97,7 +97,7 @@ pub(crate) fn scenario_nodes_editor(
                                     },
                                     assertions.len()
                                 ),
-                                |ui| assertion_rules_editor(ui, assertions, language, palette),
+                                |ui| assertion_rules_editor(ui, assertions, language),
                             );
                             ui.collapsing(
                                 format!(
@@ -108,7 +108,7 @@ pub(crate) fn scenario_nodes_editor(
                                     },
                                     extractors.len()
                                 ),
-                                |ui| extractor_rules_editor(ui, extractors, language, palette),
+                                |ui| extractor_rules_editor(ui, extractors, language),
                             );
                         }
                         ScenarioNode::Group { name, nodes } => {
@@ -128,7 +128,6 @@ pub(crate) fn scenario_nodes_editor(
                                     nodes,
                                     request_options,
                                     language,
-                                    palette,
                                     depth + 1,
                                 );
                             });
@@ -156,7 +155,6 @@ pub(crate) fn scenario_nodes_editor(
                                     then_nodes,
                                     request_options,
                                     language,
-                                    palette,
                                     depth + 1,
                                 );
                             });
@@ -167,7 +165,6 @@ pub(crate) fn scenario_nodes_editor(
                                     else_nodes,
                                     request_options,
                                     language,
-                                    palette,
                                     depth + 1,
                                 );
                             });
@@ -205,7 +202,6 @@ pub(crate) fn scenario_nodes_editor(
                                     nodes,
                                     request_options,
                                     language,
-                                    palette,
                                     depth + 1,
                                 );
                             });

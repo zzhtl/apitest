@@ -5,11 +5,12 @@ use egui_extras::{Column, TableBuilder};
 use crate::app::ApiTestApp;
 use crate::i18n::Language;
 use crate::state::response::{ResponseBodyMode, ResponseTab, TimelineEntry, TimelinePhase};
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 use crate::ui::widgets::{empty_state, tab_button};
 
 impl ApiTestApp {
-    pub(crate) fn response_panel(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn response_panel(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let websocket_selected = self
             .requests
             .get(self.selected)
@@ -20,14 +21,7 @@ impl ApiTestApp {
                 (ResponseTab::Headers, "响应头", "Headers"),
                 (ResponseTab::Timeline, "时间线", "Timeline"),
             ] {
-                if tab_button(
-                    ui,
-                    self.response_tab == tab,
-                    self.tr(chinese, english),
-                    palette,
-                )
-                .clicked()
-                {
+                if tab_button(ui, self.response_tab == tab, self.tr(chinese, english)).clicked() {
                     self.response_tab = tab;
                 }
             }
@@ -58,7 +52,7 @@ impl ApiTestApp {
             });
         });
         if websocket_selected {
-            self.websocket_message_bar(ui, palette);
+            self.websocket_message_bar(ui);
         }
         ui.separator();
         if let Some(error) = &self.response.error {
@@ -73,17 +67,14 @@ impl ApiTestApp {
             ui.add_space(6.0);
         }
         match self.response_tab {
-            ResponseTab::Body => self.response_body(ui, palette),
-            ResponseTab::Headers => {
-                response_headers(ui, &self.response.headers, self.language, palette)
-            }
-            ResponseTab::Timeline => {
-                response_timeline(ui, &self.response.timeline, self.language, palette)
-            }
+            ResponseTab::Body => self.response_body(ui),
+            ResponseTab::Headers => response_headers(ui, &self.response.headers, self.language),
+            ResponseTab::Timeline => response_timeline(ui, &self.response.timeline, self.language),
         }
     }
 
-    pub(crate) fn websocket_message_bar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn websocket_message_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let connected = self.execution_commands.is_some();
         let can_send = connected && !self.websocket_message.trim().is_empty();
         let message_hint = self
@@ -149,7 +140,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn response_body(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn response_body(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         if self.response.body.is_empty() && !self.response.is_active() {
             empty_state(
                 ui,
@@ -158,7 +150,6 @@ impl ApiTestApp {
                     "发送请求后将在此显示结果",
                     "Send a request to inspect the result",
                 ),
-                palette,
             );
             return;
         }
@@ -215,7 +206,6 @@ pub(crate) fn response_headers(
     ui: &mut egui::Ui,
     headers: &[(String, String)],
     language: Language,
-    palette: Palette,
 ) {
     if headers.is_empty() {
         empty_state(
@@ -225,7 +215,6 @@ pub(crate) fn response_headers(
                 Language::English => "No response headers",
             },
             "",
-            palette,
         );
         return;
     }
@@ -247,12 +236,8 @@ pub(crate) fn response_headers(
         });
 }
 
-pub(crate) fn response_timeline(
-    ui: &mut egui::Ui,
-    timeline: &[TimelineEntry],
-    language: Language,
-    palette: Palette,
-) {
+pub(crate) fn response_timeline(ui: &mut egui::Ui, timeline: &[TimelineEntry], language: Language) {
+    let palette = ui.palette();
     if timeline.is_empty() {
         empty_state(
             ui,
@@ -261,7 +246,6 @@ pub(crate) fn response_timeline(
                 Language::English => "No timeline",
             },
             "",
-            palette,
         );
         return;
     }

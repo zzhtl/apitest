@@ -3,7 +3,7 @@ use egui_extras::{Column, TableBuilder};
 
 use crate::draft::{BodyMode, EditableMultipartPart, MultipartValueMode, RequestDraft};
 use crate::i18n::Language;
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 use crate::ui::editors::editable_pairs;
 use crate::ui::widgets::empty_state;
 
@@ -11,8 +11,8 @@ pub(crate) fn body_editor(
     ui: &mut egui::Ui,
     draft: &mut RequestDraft,
     language: Language,
-    palette: Palette,
 ) -> Option<String> {
+    let palette = ui.palette();
     let mut error = None;
     ui.horizontal_wrapped(|ui| {
         for (mode, label) in [
@@ -61,7 +61,6 @@ pub(crate) fn body_editor(
                 Language::English => "No body",
             },
             "",
-            palette,
         ),
         BodyMode::Json | BodyMode::Text | BodyMode::Xml => {
             egui::ScrollArea::both().show(ui, |ui| {
@@ -73,10 +72,8 @@ pub(crate) fn body_editor(
                 );
             });
         }
-        BodyMode::FormUrlEncoded => {
-            editable_pairs(ui, &mut draft.form_fields, language, palette, false)
-        }
-        BodyMode::Multipart => multipart_table(ui, &mut draft.multipart_parts, language, palette),
+        BodyMode::FormUrlEncoded => editable_pairs(ui, &mut draft.form_fields, language, false),
+        BodyMode::Multipart => multipart_table(ui, &mut draft.multipart_parts, language),
         BodyMode::Binary => {
             ui.horizontal(|ui| {
                 let path = draft
@@ -117,8 +114,8 @@ pub(crate) fn multipart_table(
     ui: &mut egui::Ui,
     parts: &mut Vec<EditableMultipartPart>,
     language: Language,
-    palette: Palette,
 ) {
+    let palette = ui.palette();
     let labels = match language {
         Language::Chinese => ("名称", "类型", "值 / 文件", "Content-Type", "选择"),
         Language::English => ("Key", "Type", "Value / File", "Content-Type", "Choose"),

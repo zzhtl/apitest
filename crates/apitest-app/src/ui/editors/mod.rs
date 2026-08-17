@@ -8,14 +8,10 @@ use egui_extras::{Column, TableBuilder};
 
 use crate::draft::EditablePair;
 use crate::i18n::Language;
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 
-pub(crate) fn key_value_editor(
-    ui: &mut egui::Ui,
-    values: &mut Vec<KeyValue>,
-    language: Language,
-    palette: Palette,
-) {
+pub(crate) fn key_value_editor(ui: &mut egui::Ui, values: &mut Vec<KeyValue>, language: Language) {
+    let palette = ui.palette();
     if values.last().is_none_or(|value| {
         !value.name.is_empty() || !value.value.is_empty() || !value.description.is_empty()
     }) {
@@ -98,9 +94,9 @@ pub(crate) fn editable_pairs(
     ui: &mut egui::Ui,
     pairs: &mut Vec<EditablePair>,
     language: Language,
-    palette: Palette,
     description: bool,
 ) {
+    let palette = ui.palette();
     let labels = match language {
         Language::Chinese => ("名称", "值", "说明"),
         Language::English => ("Key", "Value", "Description"),

@@ -6,7 +6,7 @@ use eframe::egui::{self, RichText};
 
 use crate::draft::{AuthDraft, AuthMode};
 use crate::i18n::Language;
-use crate::theme::Palette;
+use crate::theme::UiExt;
 use crate::ui::widgets::empty_state;
 
 pub(crate) fn auth_editor(
@@ -15,8 +15,8 @@ pub(crate) fn auth_editor(
     request_id: EntityId,
     secrets: Arc<dyn SecretStore>,
     language: Language,
-    palette: Palette,
 ) -> Option<String> {
+    let palette = ui.palette();
     let mut mode = auth.mode();
     let previous = mode;
     ui.horizontal_wrapped(|ui| {
@@ -59,7 +59,6 @@ pub(crate) fn auth_editor(
                 Language::English => "No authentication",
             },
             "",
-            palette,
         ),
         AuthDraft::Basic { username, password } => {
             form_field(ui, language, "用户名", "Username", |ui| {

@@ -6,7 +6,7 @@ use crate::i18n::Language;
 use crate::services::loader::active_environment_setting;
 use crate::state::action::{InteropAction, PendingAction};
 use crate::state::workspace::Navigation;
-use crate::theme::{self, Palette, ThemeMode};
+use crate::theme::{self, ThemeMode, UiExt};
 use crate::ui::sidebar::protocol_creation_menu;
 
 pub(crate) const SEARCH_FIELD_ID: &str = "global_api_search";
@@ -39,7 +39,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn top_bar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let search_hint = self.tr("搜索接口  Ctrl K", "Search APIs  Ctrl K");
         let new_label = self.tr("新建", "New");
         let settings_tip = self.tr("设置", "Settings");
@@ -248,7 +249,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn activity_bar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn activity_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let mut navigate = None;
         egui::Frame::new()
             .fill(palette.rail_bg)
@@ -312,7 +314,8 @@ impl ApiTestApp {
         }
     }
 
-    pub(crate) fn document_tab_bar(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn document_tab_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         let tabs = self.document_tabs.items().to_vec();
         let active = self.document_tabs.active();
         let mut activate = None;

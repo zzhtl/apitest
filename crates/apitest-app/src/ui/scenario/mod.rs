@@ -7,12 +7,13 @@ use eframe::egui::{self, RichText};
 use crate::app::ApiTestApp;
 use crate::i18n::Language;
 use crate::state::action::PendingAction;
-use crate::theme::{self, Palette};
+use crate::theme::{self, UiExt};
 use crate::ui::scenario::nodes::scenario_nodes_editor;
 use crate::ui::widgets::empty_state;
 
 impl ApiTestApp {
-    pub(crate) fn scenario_workspace(&mut self, ui: &mut egui::Ui, palette: Palette) {
+    pub(crate) fn scenario_workspace(&mut self, ui: &mut egui::Ui) {
+        let palette = ui.palette();
         if self.scenarios.get(self.selected_scenario).is_none() {
             empty_state(
                 ui,
@@ -21,7 +22,6 @@ impl ApiTestApp {
                     "新建场景后可视化编排请求和控制节点",
                     "Create a scenario to arrange requests and control nodes",
                 ),
-                palette,
             );
             if ui.button(self.tr("新建场景", "New scenario")).clicked() {
                 self.perform_action(PendingAction::NewScenario);
@@ -139,7 +139,7 @@ impl ApiTestApp {
                 });
                 if let Some(report) = report {
                     ui.separator();
-                    scenario_report_view(ui, report, self.language, palette);
+                    scenario_report_view(ui, report, self.language);
                 }
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -148,7 +148,6 @@ impl ApiTestApp {
                         &mut scenario.nodes,
                         &request_options,
                         self.language,
-                        palette,
                         0,
                     );
                 });
@@ -165,12 +164,8 @@ impl ApiTestApp {
     }
 }
 
-pub(crate) fn scenario_report_view(
-    ui: &mut egui::Ui,
-    report: &ScenarioReport,
-    language: Language,
-    palette: Palette,
-) {
+pub(crate) fn scenario_report_view(ui: &mut egui::Ui, report: &ScenarioReport, language: Language) {
+    let palette = ui.palette();
     let result_color = if report.passed {
         palette.success
     } else {

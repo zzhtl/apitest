@@ -80,6 +80,36 @@ impl Palette {
     }
 }
 
+/// The palette that matches the visuals currently installed on the context.
+///
+/// Deriving it from `Visuals::dark_mode` keeps drawing code from having to
+/// thread a `Palette` argument through every nested widget function, and cannot
+/// drift out of sync with what `apply` installed.
+pub(crate) fn palette_of(visuals: &egui::Visuals) -> Palette {
+    Palette::for_mode(if visuals.dark_mode {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    })
+}
+
+pub(crate) fn palette(ctx: &egui::Context) -> Palette {
+    Palette::for_mode(match ctx.theme() {
+        egui::Theme::Light => ThemeMode::Light,
+        egui::Theme::Dark => ThemeMode::Dark,
+    })
+}
+
+pub(crate) trait UiExt {
+    fn palette(&self) -> Palette;
+}
+
+impl UiExt for egui::Ui {
+    fn palette(&self) -> Palette {
+        palette_of(self.visuals())
+    }
+}
+
 pub fn apply(ctx: &egui::Context, mode: ThemeMode) {
     let palette = Palette::for_mode(mode);
     let egui_theme = match mode {

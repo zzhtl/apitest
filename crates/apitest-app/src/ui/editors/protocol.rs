@@ -2,17 +2,13 @@ use apitest_core::{GrpcCallKind, ProtocolKind, ProtocolSpec};
 use eframe::egui::{self, Color32, RichText};
 
 use crate::i18n::Language;
-use crate::theme::Palette;
+use crate::theme::{Palette, UiExt};
 use crate::ui::editors::auth::form_field;
 use crate::ui::editors::key_value_editor;
 use crate::ui::request::method_combo;
 
-pub(crate) fn protocol_editor(
-    ui: &mut egui::Ui,
-    protocol: &mut ProtocolSpec,
-    language: Language,
-    palette: Palette,
-) {
+pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, language: Language) {
+    let palette = ui.palette();
     match protocol {
         ProtocolSpec::GraphQl(spec) => {
             form_field(ui, language, "地址", "Endpoint", |ui| {
@@ -52,7 +48,7 @@ pub(crate) fn protocol_editor(
         }
         ProtocolSpec::Sse(spec) => {
             ui.horizontal(|ui| {
-                method_combo(ui, &mut spec.request.method, palette);
+                method_combo(ui, &mut spec.request.method);
                 ui.add_sized(
                     [ui.available_width() - 150.0, 34.0],
                     egui::TextEdit::singleline(&mut spec.request.url)
@@ -73,7 +69,7 @@ pub(crate) fn protocol_editor(
                 })
                 .strong(),
             );
-            key_value_editor(ui, &mut spec.request.headers, language, palette);
+            key_value_editor(ui, &mut spec.request.headers, language);
         }
         ProtocolSpec::WebSocket(spec) => {
             form_field(ui, language, "地址", "URL", |ui| {
@@ -122,7 +118,7 @@ pub(crate) fn protocol_editor(
                 })
                 .strong(),
             );
-            key_value_editor(ui, &mut spec.headers, language, palette);
+            key_value_editor(ui, &mut spec.headers, language);
         }
         ProtocolSpec::Grpc(spec) => {
             form_field(ui, language, "地址", "Endpoint", |ui| {

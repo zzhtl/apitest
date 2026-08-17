@@ -6,7 +6,7 @@ use eframe::egui::{self, CornerRadius, RichText, Stroke, Vec2};
 use crate::app::{ApiTestApp, LANGUAGE_SETTING, THEME_SETTING};
 use crate::i18n::Language;
 use crate::state::action::{Confirmation, InteropAction, OpenApiPreviewTab, ToastKind};
-use crate::theme::{self, Palette, ThemeMode};
+use crate::theme::{self, ThemeMode, UiExt};
 
 impl ApiTestApp {
     pub(crate) fn settings_window(&mut self, context: &egui::Context) {
@@ -69,7 +69,7 @@ impl ApiTestApp {
             .collapsible(false)
             .default_size([720.0, 420.0])
             .show(context, |ui| {
-                ui.label(RichText::new(&hint).color(Palette::for_mode(self.theme).muted));
+                ui.label(RichText::new(&hint).color(ui.palette().muted));
                 ui.add_sized(
                     ui.available_size() - egui::vec2(0.0, 44.0),
                     egui::TextEdit::multiline(&mut self.curl_import_source)
@@ -121,7 +121,7 @@ impl ApiTestApp {
         let mut validate = false;
         let mut export_yaml = false;
         let mut export_html = false;
-        let palette = Palette::for_mode(self.theme);
+        let palette = theme::palette(context);
         egui::Window::new(self.tr("OpenAPI 设计与预览", "OpenAPI design & preview"))
             .open(&mut open)
             .collapsible(false)
@@ -291,7 +291,7 @@ impl ApiTestApp {
                             if ui
                                 .button(
                                     RichText::new(self.tr("删除", "Delete"))
-                                        .color(Palette::for_mode(self.theme).danger),
+                                        .color(ui.palette().danger),
                                 )
                                 .clicked()
                             {
@@ -356,7 +356,7 @@ impl ApiTestApp {
             return;
         }
         context.request_repaint_after(Duration::from_millis(250));
-        let palette = Palette::for_mode(self.theme);
+        let palette = theme::palette(context);
         let (icon, color) = match toast.kind {
             ToastKind::Success => ("circle-check", palette.success),
             ToastKind::Info => ("info", palette.info),
