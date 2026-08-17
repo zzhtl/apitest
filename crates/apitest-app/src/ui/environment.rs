@@ -8,7 +8,10 @@ use crate::app::ApiTestApp;
 use crate::environment::EnvironmentDraft;
 use crate::i18n::Language;
 use crate::state::action::{Confirmation, ToastKind};
+use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::pad;
 use crate::theme::{self, UiExt};
+use crate::ui::widgets::dirty_marker;
 
 impl ApiTestApp {
     pub(crate) fn environment_workspace(&mut self, ui: &mut egui::Ui) {
@@ -25,7 +28,7 @@ impl ApiTestApp {
         let mut variable_error = None;
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(18, 14))
+            .inner_margin(pad::WORKSPACE)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -36,7 +39,7 @@ impl ApiTestApp {
                         .desired_width(300.0),
                     );
                     if dirty {
-                        ui.label(RichText::new("●").color(palette.warning).size(8.0));
+                        dirty_marker(ui);
                     }
                     if environment_id == self.active_environment {
                         ui.label(
@@ -47,7 +50,7 @@ impl ApiTestApp {
                         if ui
                             .add_sized(
                                 [32.0, 30.0],
-                                egui::Button::new(theme::icon("trash-2", 14.0)),
+                                egui::Button::new(theme::icon("trash-2", icon_size::MD)),
                             )
                             .on_hover_text(delete_tip)
                             .clicked()
@@ -172,7 +175,7 @@ pub(crate) fn variable_table(
                             && ui
                                 .add_sized(
                                     [28.0, 28.0],
-                                    egui::Button::new(theme::icon("x", 13.0)).frame(false),
+                                    egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                                 )
                                 .clicked()
                         {

@@ -6,8 +6,10 @@ use crate::i18n::Language;
 use crate::services::loader::active_environment_setting;
 use crate::state::action::{InteropAction, PendingAction};
 use crate::state::workspace::Navigation;
+use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, ThemeMode, UiExt};
 use crate::ui::sidebar::protocol_creation_menu;
+use crate::ui::widgets::rail_button;
 
 pub(crate) const SEARCH_FIELD_ID: &str = "global_api_search";
 
@@ -100,7 +102,7 @@ impl ApiTestApp {
                         if ui
                             .add_sized(
                                 [32.0, 32.0],
-                                egui::Button::new(theme::icon("settings", 15.0)),
+                                egui::Button::new(theme::icon("settings", icon_size::LG)),
                             )
                             .on_hover_text(settings_tip)
                             .clicked()
@@ -285,23 +287,7 @@ impl ApiTestApp {
                         ),
                     ] {
                         let selected = self.navigation == target;
-                        let color = if selected {
-                            palette.accent_text
-                        } else {
-                            palette.muted
-                        };
-                        let button = egui::Button::new(theme::icon_label(icon, label, 11.0, color))
-                            .fill(if selected {
-                                palette.primary_soft
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .stroke(Stroke::NONE);
-                        if ui
-                            .add_sized([48.0, 42.0], button)
-                            .on_hover_text(tooltip)
-                            .clicked()
-                        {
+                        if rail_button(ui, icon, label, tooltip, selected).clicked() {
                             navigate = Some(target);
                         }
                     }
@@ -360,8 +346,11 @@ impl ApiTestApp {
                                                 if ui
                                                     .add_sized(
                                                         [20.0, 20.0],
-                                                        egui::Button::new(theme::icon("x", 11.0))
-                                                            .frame(false),
+                                                        egui::Button::new(theme::icon(
+                                                            "x",
+                                                            icon_size::SM,
+                                                        ))
+                                                        .frame(false),
                                                     )
                                                     .on_hover_text(self.tr("关闭", "Close"))
                                                     .clicked()

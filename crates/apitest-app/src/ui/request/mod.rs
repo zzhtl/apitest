@@ -11,29 +11,30 @@ use crate::i18n::Language;
 use crate::state::action::{Confirmation, PendingAction, ToastKind};
 use crate::state::response::RunState;
 use crate::state::workspace::EditorTab;
+use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::pad;
 use crate::theme::{self, Palette, UiExt};
 use crate::ui::editors::auth::auth_editor;
 use crate::ui::editors::body::body_editor;
 use crate::ui::editors::editable_pairs;
 use crate::ui::editors::protocol::{protocol_color, protocol_editor, protocol_label};
+use crate::ui::widgets::{dirty_marker, empty_state_action};
 
 impl ApiTestApp {
     pub(crate) fn request_workspace(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
         if self.requests.get(self.selected).is_none() {
-            ui.centered_and_justified(|ui| {
-                if ui
-                    .button(theme::icon_label(
-                        "plus",
-                        self.tr("新建请求", "Create request"),
-                        13.0,
-                        palette.text,
-                    ))
-                    .clicked()
-                {
-                    self.queue_action(PendingAction::NewRequest(ProtocolKind::Http));
-                }
-            });
+            if empty_state_action(
+                ui,
+                self.tr("暂无请求", "No requests"),
+                self.tr(
+                    "新建请求后可编辑参数、请求体与认证",
+                    "Create a request to edit parameters, body and authentication",
+                ),
+                self.tr("新建请求", "Create request"),
+            ) {
+                self.queue_action(PendingAction::NewRequest(ProtocolKind::Http));
+            }
             return;
         }
         let maximum = (ui.available_height() - 220.0).max(220.0);
@@ -49,7 +50,7 @@ impl ApiTestApp {
             .show(ui, |ui| self.request_composer(ui));
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(16, 10))
+            .inner_margin(pad::COMPOSER)
             .show(ui, |ui| self.response_panel(ui));
     }
 
@@ -77,7 +78,7 @@ impl ApiTestApp {
         let mut editor_error = None;
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(16, 10))
+            .inner_margin(pad::COMPOSER)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -86,13 +87,13 @@ impl ApiTestApp {
                             .desired_width(280.0),
                     );
                     if dirty {
-                        ui.label(RichText::new("●").color(palette.warning).size(8.0));
+                        dirty_marker(ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add_sized(
                                 [32.0, 30.0],
-                                egui::Button::new(theme::icon("trash-2", 14.0))
+                                egui::Button::new(theme::icon("trash-2", icon_size::MD))
                                     .stroke(Stroke::NONE),
                             )
                             .on_hover_text(delete_tip)
@@ -126,7 +127,7 @@ impl ApiTestApp {
                         egui::TextEdit::singleline(&mut self.requests[index].draft.url)
                             .hint_text("https://api.example.com/v1/users/{{id}}"),
                     );
-                    ui.menu_button(theme::icon("settings", 15.0), |ui| {
+                    ui.menu_button(theme::icon("settings", icon_size::LG), |ui| {
                         ui.set_min_width(230.0);
                         ui.label(RichText::new(settings_tip).strong());
                         ui.horizontal(|ui| {
@@ -314,7 +315,7 @@ impl ApiTestApp {
         let mut stop = false;
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(16, 10))
+            .inner_margin(pad::COMPOSER)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -328,13 +329,13 @@ impl ApiTestApp {
                             .desired_width(280.0),
                     );
                     if dirty {
-                        ui.label(RichText::new("●").color(palette.warning).size(8.0));
+                        dirty_marker(ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add_sized(
                                 [32.0, 30.0],
-                                egui::Button::new(theme::icon("trash-2", 14.0))
+                                egui::Button::new(theme::icon("trash-2", icon_size::MD))
                                     .stroke(Stroke::NONE),
                             )
                             .on_hover_text(self.tr("删除请求", "Delete request"))

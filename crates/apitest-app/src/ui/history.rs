@@ -1,10 +1,11 @@
 use apitest_core::RunState as HistoryRunState;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 
 use crate::app::ApiTestApp;
 use crate::i18n::Language;
-use crate::theme::{Palette, UiExt};
-use crate::ui::widgets::{empty_state, format_bytes};
+use crate::theme::UiExt;
+use crate::theme::tokens::pad;
+use crate::ui::widgets::{Tone, badge, empty_state, format_bytes};
 
 impl ApiTestApp {
     pub(crate) fn history_workspace(&mut self, ui: &mut egui::Ui) {
@@ -31,13 +32,14 @@ impl ApiTestApp {
             .unwrap_or(self.tr("已删除的请求", "Deleted request"));
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(18, 14))
+            .inner_margin(pad::WORKSPACE)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(request_name).heading());
-                    ui.colored_label(
-                        history_state_color(record.state, palette),
+                    badge(
+                        ui,
                         history_state_label(record.state, self.language),
+                        history_state_tone(record.state),
                     );
                 });
                 ui.horizontal_wrapped(|ui| {
@@ -118,12 +120,12 @@ pub(crate) fn history_state_label(state: HistoryRunState, language: Language) ->
     }
 }
 
-pub(crate) fn history_state_color(state: HistoryRunState, palette: Palette) -> Color32 {
+pub(crate) fn history_state_tone(state: HistoryRunState) -> Tone {
     match state {
-        HistoryRunState::Running => palette.info,
-        HistoryRunState::Passed => palette.success,
-        HistoryRunState::Failed => palette.danger,
-        HistoryRunState::Cancelled => palette.warning,
+        HistoryRunState::Running => Tone::Info,
+        HistoryRunState::Passed => Tone::Success,
+        HistoryRunState::Failed => Tone::Danger,
+        HistoryRunState::Cancelled => Tone::Warning,
     }
 }
 

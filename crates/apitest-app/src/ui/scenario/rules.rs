@@ -2,6 +2,7 @@ use apitest_core::{AssertionRule, ExtractorRule, VariableSource};
 use eframe::egui::{self, RichText};
 
 use crate::i18n::{Language, tr};
+use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, UiExt};
 
 pub(crate) fn assertion_rules_editor(
@@ -94,7 +95,7 @@ pub(crate) fn assertion_rules_editor(
                 if ui
                     .add_sized(
                         [26.0, 26.0],
-                        egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                        egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                     )
                     .on_hover_text(tr(language, "删除断言", "Delete assertion"))
                     .clicked()
@@ -211,7 +212,7 @@ pub(crate) fn extractor_rules_editor(
                 if ui
                     .add_sized(
                         [26.0, 26.0],
-                        egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                        egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                     )
                     .on_hover_text(tr(language, "删除提取器", "Delete extractor"))
                     .clicked()

@@ -7,15 +7,16 @@ use eframe::egui::{self, RichText};
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::state::action::PendingAction;
+use crate::theme::tokens::pad;
 use crate::theme::{self, UiExt};
 use crate::ui::scenario::nodes::scenario_nodes_editor;
-use crate::ui::widgets::empty_state;
+use crate::ui::widgets::{dirty_marker, empty_state_action};
 
 impl ApiTestApp {
     pub(crate) fn scenario_workspace(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
         if self.scenarios.get(self.selected_scenario).is_none() {
-            empty_state(
+            if empty_state_action(
                 ui,
                 tr(self.language, "暂无测试场景", "No scenarios"),
                 tr(
@@ -23,11 +24,8 @@ impl ApiTestApp {
                     "新建场景后可视化编排请求和控制节点",
                     "Create a scenario to arrange requests and control nodes",
                 ),
-            );
-            if ui
-                .button(tr(self.language, "新建场景", "New scenario"))
-                .clicked()
-            {
+                tr(self.language, "新建场景", "New scenario"),
+            ) {
                 self.perform_action(PendingAction::NewScenario);
             }
             return;
@@ -45,7 +43,7 @@ impl ApiTestApp {
         let mut stop = false;
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(18, 14))
+            .inner_margin(pad::WORKSPACE)
             .show(ui, |ui| {
                 let scenario = &mut self.scenarios[self.selected_scenario];
                 ui.horizontal(|ui| {
@@ -55,7 +53,7 @@ impl ApiTestApp {
                             .desired_width(320.0),
                     );
                     if dirty {
-                        ui.label(RichText::new("●").color(palette.warning).size(8.0));
+                        dirty_marker(ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if running {

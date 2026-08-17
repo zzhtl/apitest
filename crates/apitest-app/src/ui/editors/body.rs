@@ -3,6 +3,7 @@ use egui_extras::{Column, TableBuilder};
 
 use crate::draft::{BodyMode, EditableMultipartPart, MultipartValueMode, RequestDraft};
 use crate::i18n::{Language, tr};
+use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, UiExt};
 use crate::ui::editors::editable_pairs;
 use crate::ui::widgets::empty_state;
@@ -187,7 +188,7 @@ pub(crate) fn multipart_table(
                             && ui
                                 .add_sized(
                                     [28.0, 28.0],
-                                    egui::Button::new(theme::icon("x", 13.0)).frame(false),
+                                    egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                                 )
                                 .clicked()
                         {

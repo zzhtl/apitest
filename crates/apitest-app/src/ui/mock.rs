@@ -5,15 +5,17 @@ use eframe::egui::{self, RichText};
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::state::action::PendingAction;
+use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::pad;
 use crate::theme::{self, UiExt};
 use crate::ui::request::method_combo;
-use crate::ui::widgets::empty_state;
+use crate::ui::widgets::{dirty_marker, empty_state_action};
 
 impl ApiTestApp {
     pub(crate) fn mock_workspace(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
         if self.mock_profiles.get(self.selected_mock).is_none() {
-            empty_state(
+            if empty_state_action(
                 ui,
                 tr(self.language, "暂无 Mock 服务", "No mock servers"),
                 tr(
@@ -21,11 +23,8 @@ impl ApiTestApp {
                     "新建 Mock 后可从 API 契约智能生成响应",
                     "Create a mock to generate responses from API contracts",
                 ),
-            );
-            if ui
-                .button(tr(self.language, "新建 Mock", "New mock"))
-                .clicked()
-            {
+                tr(self.language, "新建 Mock", "New mock"),
+            ) {
                 self.perform_action(PendingAction::NewMock);
             }
             return;
@@ -39,7 +38,7 @@ impl ApiTestApp {
         let mut stop = false;
         egui::Frame::new()
             .fill(palette.surface)
-            .inner_margin(egui::Margin::symmetric(18, 14))
+            .inner_margin(pad::WORKSPACE)
             .show(ui, |ui| {
                 let profile = &mut self.mock_profiles[self.selected_mock];
                 ui.horizontal(|ui| {
@@ -49,7 +48,7 @@ impl ApiTestApp {
                             .desired_width(300.0),
                     );
                     if dirty {
-                        ui.label(RichText::new("●").color(palette.warning).size(8.0));
+                        dirty_marker(ui);
                     }
                     if let Some(base_url) = &base_url {
                         ui.label(RichText::new(base_url).color(palette.success));
@@ -163,7 +162,8 @@ pub(crate) fn mock_rules_editor(
                                     if ui
                                         .add_sized(
                                             [26.0, 26.0],
-                                            egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                                            egui::Button::new(theme::icon("x", icon_size::SM))
+                                                .frame(false),
                                         )
                                         .on_hover_text(tr(language, "删除规则", "Delete rule"))
                                         .clicked()
@@ -312,7 +312,7 @@ pub(crate) fn mock_key_value_editor(
                 if ui
                     .add_sized(
                         [26.0, 26.0],
-                        egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                        egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                     )
                     .clicked()
                 {
@@ -355,7 +355,7 @@ pub(crate) fn string_pair_editor(
                 if ui
                     .add_sized(
                         [26.0, 26.0],
-                        egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                        egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                     )
                     .clicked()
                 {

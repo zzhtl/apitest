@@ -2,6 +2,8 @@ use apitest_core::{EntityId, ScenarioNode};
 use eframe::egui::{self, CornerRadius, RichText, Stroke};
 
 use crate::i18n::{Language, tr};
+use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::pad;
 use crate::theme::{self, UiExt};
 use crate::ui::scenario::rules::{assertion_rules_editor, extractor_rules_editor};
 
@@ -20,7 +22,7 @@ pub(crate) fn scenario_nodes_editor(
                 .fill(palette.control)
                 .stroke(Stroke::new(1.0, palette.divider))
                 .corner_radius(CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(12, 10))
+                .inner_margin(pad::CHROME)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let label = match node {
@@ -35,7 +37,7 @@ pub(crate) fn scenario_nodes_editor(
                             if ui
                                 .add_sized(
                                     [26.0, 26.0],
-                                    egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                                    egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                                 )
                                 .on_hover_text(tr(language, "删除节点", "Delete node"))
                                 .clicked()

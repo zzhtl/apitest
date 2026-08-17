@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, mpsc},
-    time::Instant,
 };
 
 use apitest_core::{
@@ -28,10 +27,11 @@ use crate::services::loader::{
     open_database,
 };
 use crate::state::action::{
-    Confirmation, OpenApiPreviewTab, PendingAction, RuntimeMessage, Toast, ToastKind,
+    Confirmation, OpenApiPreviewTab, PendingAction, RuntimeMessage, ToastKind, Toasts,
 };
 use crate::state::response::{ResponseBodyMode, ResponseTab, ResponseView};
 use crate::state::workspace::{EditorTab, Navigation, ResourcePage, WorkspaceRequest};
+use crate::theme::tokens::size;
 use crate::theme::{self, ThemeMode, UiExt};
 use crate::workbench::{DocumentKind, DocumentTabs};
 
@@ -93,7 +93,7 @@ pub struct ApiTestApp {
     pub(crate) theme: ThemeMode,
     pub(crate) language: Language,
     pub(crate) search: String,
-    pub(crate) toast: Option<Toast>,
+    pub(crate) toasts: Toasts,
     pub(crate) confirmation: Option<Confirmation>,
     pub(crate) document_tabs: DocumentTabs,
     pub(crate) show_settings: bool,
@@ -306,11 +306,12 @@ impl ApiTestApp {
             theme,
             language,
             search: String::new(),
-            toast: startup_errors.pop().map(|message| Toast {
-                message,
-                kind: ToastKind::Error,
-                created_at: Instant::now(),
-            }),
+            toasts: startup_errors
+                .into_iter()
+                .fold(Toasts::default(), |mut toasts, message| {
+                    toasts.push(ToastKind::Error, message);
+                    toasts
+                }),
             confirmation: None,
             document_tabs,
             show_settings: false,
@@ -350,7 +351,7 @@ impl eframe::App for ApiTestApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let palette = ui.palette();
         egui::Panel::top("top_bar")
-            .exact_size(48.0)
+            .exact_size(size::TOP_BAR)
             .frame(
                 egui::Frame::new()
                     .fill(palette.panel)
@@ -358,7 +359,7 @@ impl eframe::App for ApiTestApp {
             )
             .show(ui, |ui| self.top_bar(ui));
         egui::Panel::left("activity")
-            .exact_size(60.0)
+            .exact_size(size::ACTIVITY_RAIL)
             .resizable(false)
             .frame(
                 egui::Frame::new()
@@ -367,9 +368,9 @@ impl eframe::App for ApiTestApp {
             )
             .show(ui, |ui| self.activity_bar(ui));
         egui::Panel::left("sidebar")
-            .default_size(252.0)
-            .min_size(220.0)
-            .max_size(320.0)
+            .default_size(size::SIDEBAR_DEFAULT)
+            .min_size(size::SIDEBAR_MIN)
+            .max_size(size::SIDEBAR_MAX)
             .frame(
                 egui::Frame::new()
                     .fill(palette.panel)

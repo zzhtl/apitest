@@ -35,5 +35,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-egui_kittest = { version = "0.35", features = ["eframe"] }
+egui_kittest = { version = "0.35", features = ["eframe", "wgpu"] }
 tempfile = "3.27"

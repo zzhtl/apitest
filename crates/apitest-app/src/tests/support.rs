@@ -21,7 +21,7 @@ use crate::app::ApiTestApp;
 use crate::environment::EnvironmentDraft;
 use crate::i18n::Language;
 use crate::persistence::StorageWorker;
-use crate::state::action::OpenApiPreviewTab;
+use crate::state::action::{OpenApiPreviewTab, Toasts};
 use crate::state::response::{ResponseBodyMode, ResponseTab, ResponseView};
 use crate::state::workspace::{EditorTab, Navigation, ResourcePage, WorkspaceRequest};
 use crate::theme;
@@ -220,7 +220,7 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         theme: ThemeMode::Dark,
         language: Language::Chinese,
         search: String::new(),
-        toast: None,
+        toasts: Toasts::default(),
         confirmation: None,
         document_tabs,
         show_settings: false,

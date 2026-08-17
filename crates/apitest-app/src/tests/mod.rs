@@ -5,5 +5,6 @@ mod layout;
 mod persistence;
 mod response;
 mod secrets;
+mod shots;
 mod support;
 mod workspace;

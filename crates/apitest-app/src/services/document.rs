@@ -1,12 +1,10 @@
-use std::time::Instant;
-
 use serde::Serialize;
 
 use crate::app::ApiTestApp;
 use crate::environment::EnvironmentDraft;
 use crate::i18n;
 use crate::services::loader::document_tabs_setting;
-use crate::state::action::{Toast, ToastKind};
+use crate::state::action::ToastKind;
 use crate::state::workspace::{Navigation, WorkspaceRequest};
 use crate::workbench::{DocumentId, DocumentKind};
 
@@ -16,11 +14,7 @@ impl ApiTestApp {
     }
 
     pub(crate) fn toast(&mut self, kind: ToastKind, message: impl Into<String>) {
-        self.toast = Some(Toast {
-            message: message.into(),
-            kind,
-            created_at: Instant::now(),
-        });
+        self.toasts.push(kind, message);
     }
 
     pub(crate) fn persist_setting<T: Serialize>(&mut self, key: &str, value: &T) {

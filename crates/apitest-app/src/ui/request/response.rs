@@ -5,8 +5,9 @@ use egui_extras::{Column, TableBuilder};
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::state::response::{ResponseBodyMode, ResponseTab, TimelineEntry, TimelinePhase};
+use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, UiExt};
-use crate::ui::widgets::{empty_state, tab_button};
+use crate::ui::widgets::{Tone, badge, empty_state, tab_button};
 
 impl ApiTestApp {
     pub(crate) fn response_panel(&mut self, ui: &mut egui::Ui) {
@@ -42,12 +43,7 @@ impl ApiTestApp {
                     ui.label(RichText::new(version).color(palette.muted));
                 }
                 if let Some(status) = self.response.status {
-                    let color = if status < 400 {
-                        palette.success
-                    } else {
-                        palette.danger
-                    };
-                    ui.label(RichText::new(status.to_string()).strong().color(color));
+                    badge(ui, status.to_string(), status_tone(status));
                 }
             });
         });
@@ -162,7 +158,10 @@ impl ApiTestApp {
             ui.selectable_value(&mut self.response_body_mode, ResponseBodyMode::Raw, "Raw");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .add_sized([28.0, 28.0], egui::Button::new(theme::icon("copy", 14.0)))
+                    .add_sized(
+                        [28.0, 28.0],
+                        egui::Button::new(theme::icon("copy", icon_size::MD)),
+                    )
                     .on_hover_text(self.tr("复制响应", "Copy response"))
                     .clicked()
                 {
@@ -255,5 +254,15 @@ pub(crate) fn response_timeline(ui: &mut egui::Ui, timeline: &[TimelineEntry], l
             );
             ui.label(RichText::new(format!("{} ms", entry.elapsed_ms)).color(palette.muted));
         });
+    }
+}
+
+/// 2xx succeeded, 3xx redirected, 4xx is the caller's fault, 5xx the server's.
+pub(crate) fn status_tone(status: u16) -> Tone {
+    match status {
+        100..=299 => Tone::Success,
+        300..=399 => Tone::Info,
+        400..=499 => Tone::Warning,
+        _ => Tone::Danger,
     }
 }

@@ -105,3 +105,31 @@ fn toast_error_state_remains_distinct() {
 
     assert!(harness.query_by_label("validation failed").is_some());
 }
+
+#[test]
+fn consecutive_errors_all_stay_visible() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(980.0, 640.0))
+        .build_eframe(test_app);
+    harness.state_mut().toast(ToastKind::Error, "first failure");
+    harness
+        .state_mut()
+        .toast(ToastKind::Error, "second failure");
+    harness.state_mut().toast(ToastKind::Error, "third failure");
+    harness.step();
+
+    assert_eq!(
+        harness
+            .state()
+            .toasts
+            .latest()
+            .map(|toast| toast.message.as_str()),
+        Some("third failure"),
+    );
+    for message in ["first failure", "second failure", "third failure"] {
+        assert!(
+            harness.query_by_label(message).is_some(),
+            "{message} should still be on screen",
+        );
+    }
+}

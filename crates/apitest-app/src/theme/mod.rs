@@ -1,4 +1,5 @@
 mod fonts;
+pub(crate) mod tokens;
 
 use egui::{
     Color32, CornerRadius, FontFamily, FontId, RichText, Stroke, TextFormat, TextStyle, Vec2,
@@ -144,7 +145,9 @@ pub fn apply(ctx: &egui::Context, mode: ThemeMode) {
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette.primary);
     visuals.widgets.active.bg_fill = palette.primary_soft;
     visuals.widgets.active.weak_bg_fill = palette.primary_soft;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette.primary);
+    // A 2 pt ring: `active` is also the keyboard-focus state, and the 1 pt
+    // border it used to draw was hard to spot against the control fill.
+    visuals.widgets.active.bg_stroke = Stroke::new(2.0, palette.primary);
     visuals.widgets.open = visuals.widgets.hovered;
     for widget in [
         &mut visuals.widgets.noninteractive,
@@ -189,6 +192,40 @@ pub fn icon(name: &str, size: f32) -> RichText {
     };
     let glyph = char::from_u32(icon.codepoint).unwrap_or('?');
     RichText::new(glyph.to_string()).font(FontId::new(size, FontFamily::Name(icon.family.into())))
+}
+
+/// Icon stacked above a short label, centred — the activity-rail entry.
+///
+/// A horizontal icon + label needed more width than the rail has, which wrapped
+/// `MOCK` onto a second line.
+pub fn stacked_icon_label(name: &str, label: &str, color: Color32) -> WidgetText {
+    let Some(icon) = try_icon(Pack::Lucide, name, Style::Regular, Size::Regular).ok() else {
+        return WidgetText::from(label.to_owned());
+    };
+    let glyph = char::from_u32(icon.codepoint).unwrap_or('?');
+    let mut job = LayoutJob {
+        halign: egui::Align::Center,
+        ..LayoutJob::default()
+    };
+    job.append(
+        &format!("{glyph}\n"),
+        0.0,
+        TextFormat {
+            font_id: FontId::new(14.0, FontFamily::Name(icon.family.into())),
+            color,
+            ..Default::default()
+        },
+    );
+    job.append(
+        label,
+        0.0,
+        TextFormat {
+            font_id: FontId::new(10.0, FontFamily::Proportional),
+            color,
+            ..Default::default()
+        },
+    );
+    WidgetText::from(job)
 }
 
 pub fn icon_label(name: &str, label: &str, size: f32, color: Color32) -> WidgetText {

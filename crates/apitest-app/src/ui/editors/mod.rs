@@ -8,6 +8,7 @@ use egui_extras::{Column, TableBuilder};
 
 use crate::draft::EditablePair;
 use crate::i18n::{Language, tr};
+use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, UiExt};
 
 pub(crate) fn key_value_editor(ui: &mut egui::Ui, values: &mut Vec<KeyValue>, language: Language) {
@@ -63,7 +64,7 @@ pub(crate) fn key_value_editor(ui: &mut egui::Ui, values: &mut Vec<KeyValue>, la
                             && ui
                                 .add_sized(
                                     [26.0, 26.0],
-                                    egui::Button::new(theme::icon("x", 12.0)).frame(false),
+                                    egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                                 )
                                 .clicked()
                         {
@@ -146,7 +147,7 @@ pub(crate) fn editable_pairs(
                             && ui
                                 .add_sized(
                                     [28.0, 28.0],
-                                    egui::Button::new(theme::icon("x", 13.0)).frame(false),
+                                    egui::Button::new(theme::icon("x", icon_size::SM)).frame(false),
                                 )
                                 .clicked()
                         {

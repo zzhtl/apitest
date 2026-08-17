@@ -7,10 +7,13 @@ use crate::services::document::document_snapshot;
 use crate::services::history::{HISTORY_MAX_AGE_DAYS, HISTORY_MAX_RECORDS};
 use crate::state::action::PendingAction;
 use crate::state::workspace::{ResourceRow, WorkspaceRequest};
+use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::pad;
 use crate::theme::{self, Palette, UiExt};
 use crate::ui::editors::protocol::{protocol_color, protocol_label};
 use crate::ui::history::history_state_label;
 use crate::ui::request::method_color;
+use crate::ui::widgets::{icon_button, sidebar_header, sidebar_row};
 
 impl ApiTestApp {
     pub(crate) fn api_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -22,25 +25,18 @@ impl ApiTestApp {
         let resource_rows = self.visible_resource_rows();
         egui::Frame::new()
             .fill(palette.panel)
-            .inner_margin(egui::Margin::symmetric(10, 12))
+            .inner_margin(pad::CHROME)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(self.tr("接口管理", "APIs"))
-                            .strong()
-                            .size(14.0),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.menu_button(theme::icon("plus", 14.0), |ui| {
-                            protocol_creation_menu(ui, self.language, &mut new_protocol)
-                        })
-                        .response
-                        .on_hover_text(self.tr("新建请求", "New request"));
-                    });
+                sidebar_header(ui, self.tr("接口管理", "APIs"), |ui| {
+                    ui.menu_button(theme::icon("plus", icon_size::MD), |ui| {
+                        protocol_creation_menu(ui, self.language, &mut new_protocol)
+                    })
+                    .response
+                    .on_hover_text(self.tr("新建请求", "New request"));
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label(theme::icon("folder-open", 14.0).color(palette.muted));
+                    ui.label(theme::icon("folder-open", icon_size::MD).color(palette.muted));
                     ui.label(RichText::new(&self.project.name).strong());
                 });
                 ui.add_space(6.0);
@@ -139,17 +135,8 @@ impl ApiTestApp {
                                 .requests
                                 .get(self.selected)
                                 .is_some_and(|current| current.id() == request.id());
-                            let response = ui.add_sized(
-                                [ui.available_width(), 34.0],
-                                egui::Button::new(request_row_text(request, palette))
-                                    .selected(selected)
-                                    .fill(if selected {
-                                        palette.primary_soft
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    })
-                                    .stroke(Stroke::NONE),
-                            );
+                            let response =
+                                sidebar_row(ui, selected, request_row_text(request, palette));
                             if response.clicked() && !selected {
                                 selection = Some(request.id());
                             }
@@ -177,19 +164,12 @@ impl ApiTestApp {
         let mut create = false;
         egui::Frame::new()
             .fill(palette.panel)
-            .inner_margin(egui::Margin::symmetric(12, 10))
+            .inner_margin(pad::CHROME)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(self.tr("测试场景", "Scenarios")).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized([28.0, 28.0], egui::Button::new(theme::icon("plus", 14.0)))
-                            .on_hover_text(self.tr("新建场景", "New scenario"))
-                            .clicked()
-                        {
-                            create = true;
-                        }
-                    });
+                sidebar_header(ui, self.tr("测试场景", "Scenarios"), |ui| {
+                    if icon_button(ui, "plus", self.tr("新建场景", "New scenario")).clicked() {
+                        create = true;
+                    }
                 });
             });
         ui.separator();
@@ -204,10 +184,7 @@ impl ApiTestApp {
                 } else {
                     scenario.name.clone()
                 };
-                if ui
-                    .selectable_label(index == self.selected_scenario, label)
-                    .clicked()
-                {
+                if sidebar_row(ui, index == self.selected_scenario, label).clicked() {
                     select = Some(scenario.id);
                 }
             }
@@ -226,19 +203,12 @@ impl ApiTestApp {
         let mut create = false;
         egui::Frame::new()
             .fill(palette.panel)
-            .inner_margin(egui::Margin::symmetric(12, 10))
+            .inner_margin(pad::CHROME)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(self.tr("Mock 服务", "Mock servers")).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized([28.0, 28.0], egui::Button::new(theme::icon("plus", 14.0)))
-                            .on_hover_text(self.tr("新建 Mock", "New mock"))
-                            .clicked()
-                        {
-                            create = true;
-                        }
-                    });
+                sidebar_header(ui, self.tr("Mock 服务", "Mock servers"), |ui| {
+                    if icon_button(ui, "plus", self.tr("新建 Mock", "New mock")).clicked() {
+                        create = true;
+                    }
                 });
             });
         ui.separator();
@@ -253,10 +223,7 @@ impl ApiTestApp {
                 } else {
                     profile.name.clone()
                 };
-                if ui
-                    .selectable_label(index == self.selected_mock, label)
-                    .clicked()
-                {
+                if sidebar_row(ui, index == self.selected_mock, label).clicked() {
                     select = Some(profile.id);
                 }
             }
@@ -275,22 +242,14 @@ impl ApiTestApp {
         let mut refresh = false;
         egui::Frame::new()
             .fill(palette.panel)
-            .inner_margin(egui::Margin::symmetric(12, 10))
+            .inner_margin(pad::CHROME)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(self.tr("运行历史", "Run history")).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized(
-                                [28.0, 28.0],
-                                egui::Button::new(theme::icon("refresh-cw", 13.0)),
-                            )
-                            .on_hover_text(self.tr("刷新历史", "Refresh history"))
-                            .clicked()
-                        {
-                            refresh = true;
-                        }
-                    });
+                sidebar_header(ui, self.tr("运行历史", "Run history"), |ui| {
+                    if icon_button(ui, "refresh-cw", self.tr("刷新历史", "Refresh history"))
+                        .clicked()
+                    {
+                        refresh = true;
+                    }
                 });
                 ui.label(
                     RichText::new(match self.language {
@@ -325,10 +284,7 @@ impl ApiTestApp {
                     record.started_at.format("%m-%d %H:%M:%S"),
                     record.elapsed_ms
                 );
-                if ui
-                    .selectable_label(index == self.selected_history, label)
-                    .clicked()
-                {
+                if sidebar_row(ui, index == self.selected_history, label).clicked() {
                     selection = Some(index);
                 }
             }
@@ -347,23 +303,13 @@ impl ApiTestApp {
         let mut selection = None;
         egui::Frame::new()
             .fill(palette.panel)
-            .inner_margin(egui::Margin::symmetric(10, 12))
+            .inner_margin(pad::CHROME)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(self.tr("环境管理", "Environments"))
-                            .strong()
-                            .size(14.0),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized([28.0, 28.0], egui::Button::new(theme::icon("plus", 14.0)))
-                            .on_hover_text(self.tr("新建环境", "New environment"))
-                            .clicked()
-                        {
-                            new_environment = true;
-                        }
-                    });
+                sidebar_header(ui, self.tr("环境管理", "Environments"), |ui| {
+                    if icon_button(ui, "plus", self.tr("新建环境", "New environment")).clicked()
+                    {
+                        new_environment = true;
+                    }
                 });
                 ui.add_space(10.0);
                 for (index, environment) in self.environments.iter().enumerate() {
@@ -374,19 +320,10 @@ impl ApiTestApp {
                         ""
                     };
                     let dirty = if environment.is_dirty() { "  •" } else { "" };
-                    let response = ui.add_sized(
-                        [ui.available_width(), 34.0],
-                        egui::Button::new(RichText::new(format!(
-                            "{}{}{}",
-                            environment.name, marker, dirty
-                        )))
-                        .selected(selected)
-                        .fill(if selected {
-                            palette.primary_soft
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .stroke(Stroke::NONE),
+                    let response = sidebar_row(
+                        ui,
+                        selected,
+                        RichText::new(format!("{}{}{}", environment.name, marker, dirty)),
                     );
                     if response.clicked() && !selected {
                         selection = Some(environment.id());

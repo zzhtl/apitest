@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use apitest_interop::{OpenApiIssueLevel, validate_openapi};
-use eframe::egui::{self, CornerRadius, RichText, Stroke, Vec2};
+use eframe::egui::{self, RichText, Stroke, Vec2};
 
 use crate::app::{ApiTestApp, LANGUAGE_SETTING, THEME_SETTING};
 use crate::i18n::Language;
 use crate::state::action::{Confirmation, InteropAction, OpenApiPreviewTab, ToastKind};
+use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::radius;
 use crate::theme::{self, ThemeMode, UiExt};
 
 impl ApiTestApp {
@@ -343,50 +345,72 @@ impl ApiTestApp {
     }
 
     pub(crate) fn toast_area(&mut self, context: &egui::Context) {
-        let Some(toast) = &self.toast else {
-            return;
-        };
-        let lifetime = if toast.kind == ToastKind::Error {
-            Duration::from_secs(8)
-        } else {
-            Duration::from_secs(4)
-        };
-        if toast.created_at.elapsed() >= lifetime {
-            self.toast = None;
+        self.toasts.retain_live();
+        if self.toasts.is_empty() {
             return;
         }
         context.request_repaint_after(Duration::from_millis(250));
         let palette = theme::palette(context);
-        let (icon, color) = match toast.kind {
-            ToastKind::Success => ("circle-check", palette.success),
-            ToastKind::Info => ("info", palette.info),
-            ToastKind::Error => ("circle-alert", palette.danger),
-        };
-        let message = toast.message.clone();
-        let mut close = false;
-        egui::Area::new("toast".into())
+        let copy_label = self.tr("复制", "Copy");
+        let close_label = self.tr("关闭", "Close");
+        let mut dismiss = None;
+        let mut copy = None;
+        egui::Area::new("toasts".into())
             .anchor(egui::Align2::RIGHT_BOTTOM, [-18.0, -18.0])
             .order(egui::Order::Foreground)
             .show(context, |ui| {
-                egui::Frame::popup(ui.style())
-                    .fill(palette.panel)
-                    .stroke(Stroke::new(1.0, color))
-                    .corner_radius(CornerRadius::same(6))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(theme::icon(icon, 15.0).color(color));
-                            ui.label(message);
-                            if ui
-                                .add_sized([24.0, 24.0], egui::Button::new(theme::icon("x", 13.0)))
-                                .clicked()
-                            {
-                                close = true;
-                            }
-                        });
-                    });
+                ui.with_layout(
+                    egui::Layout::bottom_up(egui::Align::Max).with_cross_justify(false),
+                    |ui| {
+                        for (index, toast) in self.toasts.iter().enumerate() {
+                            let (icon, color) = match toast.kind {
+                                ToastKind::Success => ("circle-check", palette.success),
+                                ToastKind::Info => ("info", palette.info),
+                                ToastKind::Error => ("circle-alert", palette.danger),
+                            };
+                            egui::Frame::popup(ui.style())
+                                .fill(palette.panel)
+                                .stroke(Stroke::new(1.0, color))
+                                .corner_radius(radius::MD)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(theme::icon(icon, icon_size::LG).color(color));
+                                        ui.label(&toast.message);
+                                        if toast.kind == ToastKind::Error
+                                            && ui
+                                                .add(
+                                                    egui::Button::new(theme::icon(
+                                                        "copy",
+                                                        icon_size::SM,
+                                                    ))
+                                                    .frame(false),
+                                                )
+                                                .on_hover_text(copy_label)
+                                                .clicked()
+                                        {
+                                            copy = Some(toast.message.clone());
+                                        }
+                                        if ui
+                                            .add(
+                                                egui::Button::new(theme::icon("x", icon_size::SM))
+                                                    .frame(false),
+                                            )
+                                            .on_hover_text(close_label)
+                                            .clicked()
+                                        {
+                                            dismiss = Some(index);
+                                        }
+                                    });
+                                });
+                        }
+                    },
+                );
             });
-        if close {
-            self.toast = None;
+        if let Some(message) = copy {
+            context.copy_text(message);
+        }
+        if let Some(index) = dismiss {
+            self.toasts.remove(index);
         }
     }
 }
