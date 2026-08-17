@@ -23,6 +23,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --locked
+      - run: cargo check -p apitest-app --release --locked
 
   desktop-check:
     name: Desktop check (${{ matrix.os }})

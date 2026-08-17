@@ -19,6 +19,26 @@ apitest-app
 
 `apitest-core` 不引用 UI、网络或数据库。`apitest-runtime` 只通过 `SecretStore` trait 获取密钥；`apitest-app` 负责选择具体实现并将后台事件送回 egui。
 
+## 桌面层结构
+
+ADR-0001 要求应用层按外壳、状态、服务和功能视图拆分，实际布局如下：
+
+```text
+crates/apitest-app/src/
+  app.rs        ApiTestApp 字段定义与 eframe 装配
+  i18n.rs       语言枚举与 tr()
+  state/        工作区数据、每标签会话、响应视图、待确认动作
+  services/     存储、执行、历史、校验、场景、Mock、互操作、资源树编排
+  ui/           外壳、侧栏、工作区、编辑器、代码视图、弹窗、共享组件
+  theme/        调色板、尺寸 token、字体发现
+```
+
+UI 函数不直接持有 `Palette`，而是通过 `UiExt::palette()` 从当前 visuals 推导，避免逐层透传。
+
+## 每标签会话
+
+响应、编辑器分页、运行中的取消令牌和运行历史写入器都保存在 `state::session::DocumentSession`，按 `DocumentId` 分组。运行编号全局递增，事件按编号回查所属标签，因此被取代的运行不会把数据写进别的标签。
+
 ## 请求生命周期
 
 ```text
@@ -30,7 +50,9 @@ apitest-app
   → UI 增量显示或 ScenarioRunner 汇总断言
 ```
 
-每次运行拥有独立 `CancellationToken`。界面发起新请求或点击停止时会取消旧运行；旧运行的事件还会通过运行编号隔离，避免污染当前响应。
+每次运行拥有独立 `CancellationToken`，归属于发起它的标签页。同一标签重新发送会取代上一次运行；切换标签不会取消任何请求。关闭标签或删除请求才会中止对应的运行。
+
+单次发送与场景执行共用 `apitest-runtime::verification` 中的断言与提取器求值，前置脚本在发送前同步执行，后置脚本与断言在 Tokio 运行时上执行后回传，不阻塞绘制线程。
 
 ## 存储
 
