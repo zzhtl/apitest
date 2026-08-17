@@ -1,11 +1,13 @@
-use std::{path::Path, sync::Arc};
+mod fonts;
 
 use egui::{
-    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, RichText, Stroke,
-    TextFormat, TextStyle, Vec2, WidgetText, text::LayoutJob,
+    Color32, CornerRadius, FontFamily, FontId, RichText, Stroke, TextFormat, TextStyle, Vec2,
+    WidgetText, text::LayoutJob,
 };
-use iconflow::{Pack, Size, Style, fonts, try_icon};
+use iconflow::{Pack, Size, Style, try_icon};
 use serde::{Deserialize, Serialize};
+
+pub use fonts::install_fonts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,40 +183,6 @@ pub fn apply(ctx: &egui::Context, mode: ThemeMode) {
     ctx.set_style_of(egui_theme, style);
 }
 
-pub fn install_fonts(ctx: &egui::Context) {
-    let mut definitions = FontDefinitions::default();
-    if let Some(bytes) = cjk_font_bytes() {
-        definitions
-            .font_data
-            .insert("apitest-cjk".into(), Arc::new(FontData::from_owned(bytes)));
-        for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            if let Some(family_fonts) = definitions.families.get_mut(&family) {
-                family_fonts.push("apitest-cjk".into());
-            }
-        }
-    }
-
-    let fallback_fonts = definitions.font_data.keys().cloned().collect::<Vec<_>>();
-    for font in fonts() {
-        definitions.font_data.insert(
-            font.family.to_owned(),
-            Arc::new(FontData::from_static(font.bytes)),
-        );
-        let family = definitions
-            .families
-            .entry(FontFamily::Name(font.family.into()))
-            .or_default();
-        family.push(font.family.to_owned());
-        family.extend(
-            fallback_fonts
-                .iter()
-                .filter(|fallback| fallback.as_str() != font.family)
-                .cloned(),
-        );
-    }
-    ctx.set_fonts(definitions);
-}
-
 pub fn icon(name: &str, size: f32) -> RichText {
     let Some(icon) = try_icon(Pack::Lucide, name, Style::Regular, Size::Regular).ok() else {
         return RichText::new("?").size(size);
@@ -248,19 +216,6 @@ pub fn icon_label(name: &str, label: &str, size: f32, color: Color32) -> WidgetT
         },
     );
     WidgetText::from(job)
-}
-
-fn cjk_font_bytes() -> Option<Vec<u8>> {
-    [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        "C:\\Windows\\Fonts\\msyh.ttc",
-        "C:\\Windows\\Fonts\\simhei.ttf",
-        "/System/Library/Fonts/PingFang.ttc",
-    ]
-    .iter()
-    .find_map(|path| std::fs::read(Path::new(path)).ok())
 }
 
 const fn rgb(value: u32) -> Color32 {

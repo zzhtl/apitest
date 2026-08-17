@@ -19,7 +19,7 @@ use eframe::egui::{self, Stroke};
 use tokio_util::sync::CancellationToken;
 
 use crate::environment::EnvironmentDraft;
-use crate::i18n::Language;
+use crate::i18n::{self, Language};
 use crate::persistence::StorageWorker;
 use crate::services::document::document_snapshot;
 use crate::services::history::HISTORY_MAX_RECORDS;
@@ -130,7 +130,22 @@ impl ApiTestApp {
             });
         let theme = load_setting(database.as_deref(), THEME_SETTING, ThemeMode::Dark);
         let language = load_setting(database.as_deref(), LANGUAGE_SETTING, Language::Chinese);
-        theme::install_fonts(&context.egui_ctx);
+        let font_report = theme::install_fonts(&context.egui_ctx);
+        if font_report.is_missing() {
+            startup_errors.push(
+                i18n::tr(
+                    language,
+                    "未检测到中文字体，中文界面会显示为方块；请安装 Noto Sans CJK SC 或思源黑体",
+                    "No Chinese font was found; Chinese labels will render as boxes. Install Noto Sans CJK SC or Source Han Sans.",
+                )
+                .to_owned(),
+            );
+        }
+        tracing::info!(
+            cjk_family = font_report.cjk_family.as_deref().unwrap_or("<none>"),
+            scanned_fallback_paths = font_report.scanned_fallback_paths,
+            "installed application fonts"
+        );
         theme::apply(&context.egui_ctx, theme);
 
         let runtime = Arc::new(

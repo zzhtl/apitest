@@ -29,6 +29,7 @@ eframe = { version = "0.35", default-features = false, features = ["accesskit", 
 egui = "0.35"
 egui_extras = "0.35"
 eventsource-stream = "0.2"
+fontdb = "0.24"
 futures = "0.3"
 http = "1.3"
 hmac = "0.12"
