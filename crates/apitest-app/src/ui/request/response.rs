@@ -3,7 +3,7 @@ use eframe::egui::{self, CornerRadius, RichText, Stroke};
 use egui_extras::{Column, TableBuilder};
 
 use crate::app::ApiTestApp;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::state::response::{ResponseBodyMode, ResponseTab, TimelineEntry, TimelinePhase};
 use crate::theme::{self, UiExt};
 use crate::ui::widgets::{empty_state, tab_button};
@@ -208,14 +208,7 @@ pub(crate) fn response_headers(
     language: Language,
 ) {
     if headers.is_empty() {
-        empty_state(
-            ui,
-            match language {
-                Language::Chinese => "暂无响应头",
-                Language::English => "No response headers",
-            },
-            "",
-        );
+        empty_state(ui, tr(language, "暂无响应头", "No response headers"), "");
         return;
     }
     TableBuilder::new(ui)
@@ -239,14 +232,7 @@ pub(crate) fn response_headers(
 pub(crate) fn response_timeline(ui: &mut egui::Ui, timeline: &[TimelineEntry], language: Language) {
     let palette = ui.palette();
     if timeline.is_empty() {
-        empty_state(
-            ui,
-            match language {
-                Language::Chinese => "暂无时间线",
-                Language::English => "No timeline",
-            },
-            "",
-        );
+        empty_state(ui, tr(language, "暂无时间线", "No timeline"), "");
         return;
     }
     for entry in timeline {

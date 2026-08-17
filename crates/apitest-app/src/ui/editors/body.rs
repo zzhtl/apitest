@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText};
 use egui_extras::{Column, TableBuilder};
 
 use crate::draft::{BodyMode, EditableMultipartPart, MultipartValueMode, RequestDraft};
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::theme::{self, UiExt};
 use crate::ui::editors::editable_pairs;
 use crate::ui::widgets::empty_state;
@@ -30,10 +30,7 @@ pub(crate) fn body_editor(
             && ui
                 .button(theme::icon_label(
                     "braces",
-                    match language {
-                        Language::Chinese => "格式化",
-                        Language::English => "Format",
-                    },
+                    tr(language, "格式化", "Format"),
                     12.0,
                     palette.text,
                 ))
@@ -54,14 +51,7 @@ pub(crate) fn body_editor(
     });
     ui.add_space(4.0);
     match draft.body_mode {
-        BodyMode::None => empty_state(
-            ui,
-            match language {
-                Language::Chinese => "无请求体",
-                Language::English => "No body",
-            },
-            "",
-        ),
+        BodyMode::None => empty_state(ui, tr(language, "无请求体", "No body"), ""),
         BodyMode::Json | BodyMode::Text | BodyMode::Xml => {
             egui::ScrollArea::both().show(ui, |ui| {
                 ui.add_sized(
@@ -92,10 +82,7 @@ pub(crate) fn body_editor(
                 if ui
                     .button(theme::icon_label(
                         "folder-open",
-                        match language {
-                            Language::Chinese => "选择",
-                            Language::English => "Choose",
-                        },
+                        tr(language, "选择", "Choose"),
                         12.0,
                         palette.text,
                     ))

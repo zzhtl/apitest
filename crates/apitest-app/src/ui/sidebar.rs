@@ -2,7 +2,7 @@ use apitest_core::{ProjectNodeKind, ProtocolKind, ProtocolSpec};
 use eframe::egui::{self, Color32, RichText, Stroke, TextFormat, text::LayoutJob};
 
 use crate::app::ApiTestApp;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::services::document::document_snapshot;
 use crate::services::history::{HISTORY_MAX_AGE_DAYS, HISTORY_MAX_RECORDS};
 use crate::state::action::PendingAction;
@@ -316,10 +316,7 @@ impl ApiTestApp {
                             .find(|request| request.request_case.id == case_id)
                     })
                     .map(|request| request.name.as_str())
-                    .unwrap_or(match self.language {
-                        Language::Chinese => "已删除的请求",
-                        Language::English => "Deleted request",
-                    });
+                    .unwrap_or(self.tr("已删除的请求", "Deleted request"));
                 let state = history_state_label(record.state, self.language);
                 let label = format!(
                     "{}  {}\n{}  ·  {} ms",
@@ -411,10 +408,7 @@ pub(crate) fn protocol_creation_menu(
     selected: &mut Option<ProtocolKind>,
 ) {
     ui.set_min_width(180.0);
-    ui.label(match language {
-        Language::Chinese => "新建接口",
-        Language::English => "New API",
-    });
+    ui.label(tr(language, "新建接口", "New API"));
     ui.separator();
     for (kind, label) in [
         (ProtocolKind::Http, "HTTP"),

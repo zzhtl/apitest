@@ -1,7 +1,7 @@
 use apitest_core::{GrpcCallKind, ProtocolKind, ProtocolSpec};
 use eframe::egui::{self, Color32, RichText};
 
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::theme::{Palette, UiExt};
 use crate::ui::editors::auth::form_field;
 use crate::ui::editors::key_value_editor;
@@ -54,21 +54,9 @@ pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, la
                     egui::TextEdit::singleline(&mut spec.request.url)
                         .hint_text("https://api.example.com/events"),
                 );
-                ui.checkbox(
-                    &mut spec.reconnect,
-                    match language {
-                        Language::Chinese => "自动重连",
-                        Language::English => "Reconnect",
-                    },
-                );
+                ui.checkbox(&mut spec.reconnect, tr(language, "自动重连", "Reconnect"));
             });
-            ui.label(
-                RichText::new(match language {
-                    Language::Chinese => "请求头",
-                    Language::English => "Headers",
-                })
-                .strong(),
-            );
+            ui.label(RichText::new(tr(language, "请求头", "Headers")).strong());
             key_value_editor(ui, &mut spec.request.headers, language);
         }
         ProtocolSpec::WebSocket(spec) => {
@@ -96,28 +84,16 @@ pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, la
             ui.horizontal(|ui| {
                 ui.checkbox(
                     &mut spec.validate_tls,
-                    match language {
-                        Language::Chinese => "校验 TLS 证书",
-                        Language::English => "Validate TLS",
-                    },
+                    tr(language, "校验 TLS 证书", "Validate TLS"),
                 );
-                ui.label(match language {
-                    Language::Chinese => "连接超时",
-                    Language::English => "Connect timeout",
-                });
+                ui.label(tr(language, "连接超时", "Connect timeout"));
                 ui.add(
                     egui::DragValue::new(&mut spec.connect_timeout_ms)
                         .range(1..=600_000)
                         .suffix(" ms"),
                 );
             });
-            ui.label(
-                RichText::new(match language {
-                    Language::Chinese => "请求头",
-                    Language::English => "Headers",
-                })
-                .strong(),
-            );
+            ui.label(RichText::new(tr(language, "请求头", "Headers")).strong());
             key_value_editor(ui, &mut spec.headers, language);
         }
         ProtocolSpec::Grpc(spec) => {
@@ -129,19 +105,13 @@ pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, la
                 );
             });
             ui.horizontal(|ui| {
-                ui.label(match language {
-                    Language::Chinese => "服务",
-                    Language::English => "Service",
-                });
+                ui.label(tr(language, "服务", "Service"));
                 ui.add(
                     egui::TextEdit::singleline(&mut spec.service)
                         .hint_text("package.Greeter")
                         .desired_width(240.0),
                 );
-                ui.label(match language {
-                    Language::Chinese => "方法",
-                    Language::English => "Method",
-                });
+                ui.label(tr(language, "方法", "Method"));
                 ui.add(
                     egui::TextEdit::singleline(&mut spec.method)
                         .hint_text("SayHello")
@@ -167,16 +137,10 @@ pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, la
             ui.horizontal(|ui| {
                 ui.checkbox(
                     &mut spec.use_reflection,
-                    match language {
-                        Language::Chinese => "服务端反射",
-                        Language::English => "Server reflection",
-                    },
+                    tr(language, "服务端反射", "Server reflection"),
                 );
                 if ui
-                    .button(match language {
-                        Language::Chinese => "选择 proto",
-                        Language::English => "Choose proto",
-                    })
+                    .button(tr(language, "选择 proto", "Choose proto"))
                     .clicked()
                     && let Some(files) = rfd::FileDialog::new()
                         .add_filter("Protocol Buffers", &["proto"])
@@ -186,10 +150,7 @@ pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, la
                     spec.use_reflection = false;
                 }
                 if ui
-                    .button(match language {
-                        Language::Chinese => "选择 descriptor",
-                        Language::English => "Choose descriptor",
-                    })
+                    .button(tr(language, "选择 descriptor", "Choose descriptor"))
                     .clicked()
                     && let Some(file) = rfd::FileDialog::new().pick_file()
                 {
@@ -212,13 +173,7 @@ pub(crate) fn protocol_editor(ui: &mut egui::Ui, protocol: &mut ProtocolSpec, la
                 };
                 ui.label(RichText::new(source).color(palette.muted));
             });
-            ui.label(
-                RichText::new(match language {
-                    Language::Chinese => "请求消息 JSON",
-                    Language::English => "Request message JSON",
-                })
-                .strong(),
-            );
+            ui.label(RichText::new(tr(language, "请求消息 JSON", "Request message JSON")).strong());
             ui.add_sized(
                 ui.available_size(),
                 egui::TextEdit::multiline(&mut spec.message_json)

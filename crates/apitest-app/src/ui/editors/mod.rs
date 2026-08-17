@@ -7,7 +7,7 @@ use eframe::egui::{self, RichText};
 use egui_extras::{Column, TableBuilder};
 
 use crate::draft::EditablePair;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::theme::{self, UiExt};
 
 pub(crate) fn key_value_editor(ui: &mut egui::Ui, values: &mut Vec<KeyValue>, language: Language) {
@@ -31,22 +31,10 @@ pub(crate) fn key_value_editor(ui: &mut egui::Ui, values: &mut Vec<KeyValue>, la
         .header(26.0, |mut header| {
             header.col(|_| {});
             header.col(|ui| {
-                ui.label(
-                    RichText::new(match language {
-                        Language::Chinese => "名称",
-                        Language::English => "Name",
-                    })
-                    .color(palette.muted),
-                );
+                ui.label(RichText::new(tr(language, "名称", "Name")).color(palette.muted));
             });
             header.col(|ui| {
-                ui.label(
-                    RichText::new(match language {
-                        Language::Chinese => "值",
-                        Language::English => "Value",
-                    })
-                    .color(palette.muted),
-                );
+                ui.label(RichText::new(tr(language, "值", "Value")).color(palette.muted));
             });
             header.col(|_| {});
         })

@@ -5,7 +5,7 @@ use apitest_runtime::ScenarioReport;
 use eframe::egui::{self, RichText};
 
 use crate::app::ApiTestApp;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::state::action::PendingAction;
 use crate::theme::{self, UiExt};
 use crate::ui::scenario::nodes::scenario_nodes_editor;
@@ -17,13 +17,17 @@ impl ApiTestApp {
         if self.scenarios.get(self.selected_scenario).is_none() {
             empty_state(
                 ui,
-                self.tr("暂无测试场景", "No scenarios"),
-                self.tr(
+                tr(self.language, "暂无测试场景", "No scenarios"),
+                tr(
+                    self.language,
                     "新建场景后可视化编排请求和控制节点",
                     "Create a scenario to arrange requests and control nodes",
                 ),
             );
-            if ui.button(self.tr("新建场景", "New scenario")).clicked() {
+            if ui
+                .button(tr(self.language, "新建场景", "New scenario"))
+                .clicked()
+            {
                 self.perform_action(PendingAction::NewScenario);
             }
             return;
@@ -55,23 +59,14 @@ impl ApiTestApp {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if running {
-                            if ui
-                                .button(match self.language {
-                                    Language::Chinese => "停止",
-                                    Language::English => "Stop",
-                                })
-                                .clicked()
-                            {
+                            if ui.button(tr(self.language, "停止", "Stop")).clicked() {
                                 stop = true;
                             }
                             ui.spinner();
                         } else if ui
                             .button(theme::icon_label(
                                 "play",
-                                match self.language {
-                                    Language::Chinese => "运行场景",
-                                    Language::English => "Run scenario",
-                                },
+                                tr(self.language, "运行场景", "Run scenario"),
                                 12.0,
                                 palette.text,
                             ))
@@ -84,10 +79,7 @@ impl ApiTestApp {
                                 dirty,
                                 egui::Button::new(theme::icon_label(
                                     "save",
-                                    match self.language {
-                                        Language::Chinese => "保存",
-                                        Language::English => "Save",
-                                    },
+                                    tr(self.language, "保存", "Save"),
                                     12.0,
                                     palette.text,
                                 )),
@@ -101,24 +93,16 @@ impl ApiTestApp {
                 ui.horizontal(|ui| {
                     ui.checkbox(
                         &mut scenario.stop_on_failure,
-                        match self.language {
-                            Language::Chinese => "失败时停止",
-                            Language::English => "Stop on failure",
-                        },
+                        tr(self.language, "失败时停止", "Stop on failure"),
                     );
-                    let dataset = scenario
-                        .dataset_path
-                        .as_deref()
-                        .unwrap_or(match self.language {
-                            Language::Chinese => "未选择数据集",
-                            Language::English => "No dataset",
-                        });
+                    let dataset = scenario.dataset_path.as_deref().unwrap_or(tr(
+                        self.language,
+                        "未选择数据集",
+                        "No dataset",
+                    ));
                     ui.label(RichText::new(dataset).small().color(palette.muted));
                     if ui
-                        .button(match self.language {
-                            Language::Chinese => "选择 CSV/JSON",
-                            Language::English => "Choose CSV/JSON",
-                        })
+                        .button(tr(self.language, "选择 CSV/JSON", "Choose CSV/JSON"))
                         .clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .add_filter("Dataset", &["csv", "json"])
@@ -127,12 +111,7 @@ impl ApiTestApp {
                         scenario.dataset_path = Some(path.display().to_string());
                     }
                     if scenario.dataset_path.is_some()
-                        && ui
-                            .button(match self.language {
-                                Language::Chinese => "清除",
-                                Language::English => "Clear",
-                            })
-                            .clicked()
+                        && ui.button(tr(self.language, "清除", "Clear")).clicked()
                     {
                         scenario.dataset_path = None;
                     }
@@ -191,10 +170,7 @@ pub(crate) fn scenario_report_view(ui: &mut egui::Ui, report: &ScenarioReport, l
             RichText::new(format!(
                 "{} {}",
                 report.steps.len(),
-                match language {
-                    Language::Chinese => "个步骤",
-                    Language::English => "steps",
-                }
+                tr(language, "个步骤", "steps")
             ))
             .small()
             .color(palette.muted),

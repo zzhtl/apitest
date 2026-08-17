@@ -1,7 +1,7 @@
 use apitest_core::{EntityId, ScenarioNode};
 use eframe::egui::{self, CornerRadius, RichText, Stroke};
 
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::theme::{self, UiExt};
 use crate::ui::scenario::rules::{assertion_rules_editor, extractor_rules_editor};
 
@@ -24,23 +24,11 @@ pub(crate) fn scenario_nodes_editor(
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let label = match node {
-                            ScenarioNode::Request { .. } => match language {
-                                Language::Chinese => "请求",
-                                Language::English => "Request",
-                            },
-                            ScenarioNode::Group { .. } => match language {
-                                Language::Chinese => "分组",
-                                Language::English => "Group",
-                            },
+                            ScenarioNode::Request { .. } => tr(language, "请求", "Request"),
+                            ScenarioNode::Group { .. } => tr(language, "分组", "Group"),
                             ScenarioNode::If { .. } => "If",
-                            ScenarioNode::Loop { .. } => match language {
-                                Language::Chinese => "循环",
-                                Language::English => "Loop",
-                            },
-                            ScenarioNode::Delay { .. } => match language {
-                                Language::Chinese => "等待",
-                                Language::English => "Delay",
-                            },
+                            ScenarioNode::Loop { .. } => tr(language, "循环", "Loop"),
+                            ScenarioNode::Delay { .. } => tr(language, "等待", "Delay"),
                         };
                         ui.label(RichText::new(label).strong().color(palette.accent_text));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -49,10 +37,7 @@ pub(crate) fn scenario_nodes_editor(
                                     [26.0, 26.0],
                                     egui::Button::new(theme::icon("x", 12.0)).frame(false),
                                 )
-                                .on_hover_text(match language {
-                                    Language::Chinese => "删除节点",
-                                    Language::English => "Delete node",
-                                })
+                                .on_hover_text(tr(language, "删除节点", "Delete node"))
                                 .clicked()
                             {
                                 remove = Some(index);
@@ -70,15 +55,9 @@ pub(crate) fn scenario_nodes_editor(
                                 .iter()
                                 .find(|(id, _)| id == case_id)
                                 .map(|(_, name)| name.as_str())
-                                .unwrap_or(match language {
-                                    Language::Chinese => "请求已不存在",
-                                    Language::English => "Missing request",
-                                });
+                                .unwrap_or(tr(language, "请求已不存在", "Missing request"));
                             ui.horizontal(|ui| {
-                                ui.label(match language {
-                                    Language::Chinese => "执行请求",
-                                    Language::English => "Run request",
-                                });
+                                ui.label(tr(language, "执行请求", "Run request"));
                                 egui::ComboBox::from_id_salt("request_case")
                                     .selected_text(selected)
                                     .width(260.0)
@@ -91,10 +70,7 @@ pub(crate) fn scenario_nodes_editor(
                             ui.collapsing(
                                 format!(
                                     "{} ({})",
-                                    match language {
-                                        Language::Chinese => "断言",
-                                        Language::English => "Assertions",
-                                    },
+                                    tr(language, "断言", "Assertions"),
                                     assertions.len()
                                 ),
                                 |ui| assertion_rules_editor(ui, assertions, language),
@@ -102,10 +78,7 @@ pub(crate) fn scenario_nodes_editor(
                             ui.collapsing(
                                 format!(
                                     "{} ({})",
-                                    match language {
-                                        Language::Chinese => "提取变量",
-                                        Language::English => "Extract variables",
-                                    },
+                                    tr(language, "提取变量", "Extract variables"),
                                     extractors.len()
                                 ),
                                 |ui| extractor_rules_editor(ui, extractors, language),
@@ -113,10 +86,7 @@ pub(crate) fn scenario_nodes_editor(
                         }
                         ScenarioNode::Group { name, nodes } => {
                             ui.horizontal(|ui| {
-                                ui.label(match language {
-                                    Language::Chinese => "分组名称",
-                                    Language::English => "Group name",
-                                });
+                                ui.label(tr(language, "分组名称", "Group name"));
                                 ui.add(
                                     egui::TextEdit::singleline(name)
                                         .desired_width(ui.available_width()),
@@ -138,10 +108,7 @@ pub(crate) fn scenario_nodes_editor(
                             else_nodes,
                         } => {
                             ui.horizontal(|ui| {
-                                ui.label(match language {
-                                    Language::Chinese => "条件表达式",
-                                    Language::English => "Expression",
-                                });
+                                ui.label(tr(language, "条件表达式", "Expression"));
                                 ui.add(
                                     egui::TextEdit::singleline(expression)
                                         .code_editor()
@@ -176,24 +143,15 @@ pub(crate) fn scenario_nodes_editor(
                             nodes,
                         } => {
                             ui.horizontal(|ui| {
-                                ui.label(match language {
-                                    Language::Chinese => "数据源",
-                                    Language::English => "Source",
-                                });
+                                ui.label(tr(language, "数据源", "Source"));
                                 ui.add(
                                     egui::TextEdit::singleline(source)
                                         .code_editor()
                                         .desired_width(220.0),
                                 );
-                                ui.label(match language {
-                                    Language::Chinese => "变量名",
-                                    Language::English => "Item",
-                                });
+                                ui.label(tr(language, "变量名", "Item"));
                                 ui.add(egui::TextEdit::singleline(item_name).desired_width(120.0));
-                                ui.label(match language {
-                                    Language::Chinese => "上限",
-                                    Language::English => "Limit",
-                                });
+                                ui.label(tr(language, "上限", "Limit"));
                                 ui.add(egui::DragValue::new(max_iterations).range(1..=100_000));
                             });
                             ui.indent("loop_nodes", |ui| {
@@ -208,10 +166,7 @@ pub(crate) fn scenario_nodes_editor(
                         }
                         ScenarioNode::Delay { millis } => {
                             ui.horizontal(|ui| {
-                                ui.label(match language {
-                                    Language::Chinese => "等待时长",
-                                    Language::English => "Duration",
-                                });
+                                ui.label(tr(language, "等待时长", "Duration"));
                                 ui.add(egui::DragValue::new(millis).range(0..=3_600_000));
                                 ui.label("ms");
                             });
@@ -228,20 +183,14 @@ pub(crate) fn scenario_nodes_editor(
     ui.menu_button(
         theme::icon_label(
             "plus",
-            match language {
-                Language::Chinese => "添加节点",
-                Language::English => "Add node",
-            },
+            tr(language, "添加节点", "Add node"),
             12.0,
             palette.text,
         ),
         |ui| {
             let request = ui.add_enabled(
                 !request_options.is_empty(),
-                egui::Button::new(match language {
-                    Language::Chinese => "请求",
-                    Language::English => "Request",
-                }),
+                egui::Button::new(tr(language, "请求", "Request")),
             );
             if request.clicked() {
                 nodes.push(ScenarioNode::Request {
@@ -251,19 +200,9 @@ pub(crate) fn scenario_nodes_editor(
                 });
                 ui.close();
             }
-            if ui
-                .button(match language {
-                    Language::Chinese => "分组",
-                    Language::English => "Group",
-                })
-                .clicked()
-            {
+            if ui.button(tr(language, "分组", "Group")).clicked() {
                 nodes.push(ScenarioNode::Group {
-                    name: match language {
-                        Language::Chinese => "新分组",
-                        Language::English => "New group",
-                    }
-                    .into(),
+                    name: tr(language, "新分组", "New group").into(),
                     nodes: Vec::new(),
                 });
                 ui.close();
@@ -276,13 +215,7 @@ pub(crate) fn scenario_nodes_editor(
                 });
                 ui.close();
             }
-            if ui
-                .button(match language {
-                    Language::Chinese => "循环",
-                    Language::English => "Loop",
-                })
-                .clicked()
-            {
+            if ui.button(tr(language, "循环", "Loop")).clicked() {
                 nodes.push(ScenarioNode::Loop {
                     source: String::new(),
                     item_name: "item".into(),
@@ -291,13 +224,7 @@ pub(crate) fn scenario_nodes_editor(
                 });
                 ui.close();
             }
-            if ui
-                .button(match language {
-                    Language::Chinese => "等待",
-                    Language::English => "Delay",
-                })
-                .clicked()
-            {
+            if ui.button(tr(language, "等待", "Delay")).clicked() {
                 nodes.push(ScenarioNode::Delay { millis: 100 });
                 ui.close();
             }

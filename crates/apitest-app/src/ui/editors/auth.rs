@@ -5,7 +5,7 @@ use apitest_storage::SecretStore;
 use eframe::egui::{self, RichText};
 
 use crate::draft::{AuthDraft, AuthMode};
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::theme::UiExt;
 use crate::ui::widgets::empty_state;
 
@@ -52,14 +52,7 @@ pub(crate) fn auth_editor(
     }
     ui.add_space(8.0);
     match auth {
-        AuthDraft::None => empty_state(
-            ui,
-            match language {
-                Language::Chinese => "无认证",
-                Language::English => "No authentication",
-            },
-            "",
-        ),
+        AuthDraft::None => empty_state(ui, tr(language, "无认证", "No authentication"), ""),
         AuthDraft::Basic { username, password } => {
             form_field(ui, language, "用户名", "Username", |ui| {
                 ui.add_sized([360.0, 32.0], egui::TextEdit::singleline(username));
@@ -245,10 +238,11 @@ pub(crate) fn auth_editor(
         AuthDraft::Unsupported(_) => {
             ui.colored_label(
                 palette.warning,
-                match language {
-                    Language::Chinese => "该认证类型保持原配置，但当前不可编辑",
-                    Language::English => "This authentication type is preserved but not editable",
-                },
+                tr(
+                    language,
+                    "该认证类型保持原配置，但当前不可编辑",
+                    "This authentication type is preserved but not editable",
+                ),
             );
         }
     }

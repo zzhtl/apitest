@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::app::ApiTestApp;
 use crate::environment::EnvironmentDraft;
-use crate::i18n::Language;
+use crate::i18n;
 use crate::services::loader::document_tabs_setting;
 use crate::state::action::{Toast, ToastKind};
 use crate::state::workspace::{Navigation, WorkspaceRequest};
@@ -12,10 +12,7 @@ use crate::workbench::{DocumentId, DocumentKind};
 
 impl ApiTestApp {
     pub(crate) fn tr<'a>(&self, chinese: &'a str, english: &'a str) -> &'a str {
-        match self.language {
-            Language::Chinese => chinese,
-            Language::English => english,
-        }
+        i18n::tr(self.language, chinese, english)
     }
 
     pub(crate) fn toast(&mut self, kind: ToastKind, message: impl Into<String>) {

@@ -5,7 +5,7 @@ use apitest_storage::{Database, PageRequest};
 
 use crate::app::{ACTIVE_ENVIRONMENT_SETTING, ACTIVE_PROJECT_SETTING, DOCUMENT_TABS_SETTING};
 use crate::environment::EnvironmentDraft;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::persistence::open_workspace_database;
 use crate::state::workspace::{ResourcePage, WorkspaceRequest};
 use crate::workbench::{DocumentId, DocumentKind, DocumentTabs};
@@ -121,10 +121,7 @@ pub(crate) fn load_project_content(
         requests.push(WorkspaceRequest::from_definition(definition, request_case));
     }
     if requests.is_empty() {
-        let mut request = WorkspaceRequest::new(match language {
-            Language::Chinese => "未命名请求",
-            Language::English => "Untitled request",
-        });
+        let mut request = WorkspaceRequest::new(tr(language, "未命名请求", "Untitled request"));
         request.draft.url = "https://httpbin.org/get".into();
         requests.push(request);
     }

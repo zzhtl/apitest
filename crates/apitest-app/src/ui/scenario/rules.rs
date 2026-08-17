@@ -1,7 +1,7 @@
 use apitest_core::{AssertionRule, ExtractorRule, VariableSource};
 use eframe::egui::{self, RichText};
 
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::theme::{self, UiExt};
 
 pub(crate) fn assertion_rules_editor(
@@ -38,10 +38,7 @@ pub(crate) fn assertion_rules_editor(
                 if selected_kind == current_kind {
                     match rule {
                         AssertionRule::Status { expected } => {
-                            ui.label(match language {
-                                Language::Chinese => "期望状态码",
-                                Language::English => "Expected status",
-                            });
+                            ui.label(tr(language, "期望状态码", "Expected status"));
                             ui.add(egui::DragValue::new(expected).range(100..=599));
                         }
                         AssertionRule::HeaderEquals { name, expected } => {
@@ -52,10 +49,7 @@ pub(crate) fn assertion_rules_editor(
                             );
                             ui.add(
                                 egui::TextEdit::singleline(expected)
-                                    .hint_text(match language {
-                                        Language::Chinese => "期望值",
-                                        Language::English => "Expected value",
-                                    })
+                                    .hint_text(tr(language, "期望值", "Expected value"))
                                     .desired_width(220.0),
                             );
                         }
@@ -68,19 +62,17 @@ pub(crate) fn assertion_rules_editor(
                             );
                             ui.add(
                                 egui::TextEdit::singleline(expected)
-                                    .hint_text(match language {
-                                        Language::Chinese => "期望值",
-                                        Language::English => "Expected value",
-                                    })
+                                    .hint_text(tr(language, "期望值", "Expected value"))
                                     .desired_width(220.0),
                             );
                         }
                         AssertionRule::Schema => {
                             ui.label(
-                                RichText::new(match language {
-                                    Language::Chinese => "校验响应是否符合契约 Schema",
-                                    Language::English => "Validate the response against its schema",
-                                })
+                                RichText::new(tr(
+                                    language,
+                                    "校验响应是否符合契约 Schema",
+                                    "Validate the response against its schema",
+                                ))
                                 .color(palette.muted),
                             );
                         }
@@ -104,10 +96,7 @@ pub(crate) fn assertion_rules_editor(
                         [26.0, 26.0],
                         egui::Button::new(theme::icon("x", 12.0)).frame(false),
                     )
-                    .on_hover_text(match language {
-                        Language::Chinese => "删除断言",
-                        Language::English => "Delete assertion",
-                    })
+                    .on_hover_text(tr(language, "删除断言", "Delete assertion"))
                     .clicked()
                 {
                     remove = Some(index);
@@ -121,20 +110,14 @@ pub(crate) fn assertion_rules_editor(
     if let Some(index) = remove {
         rules.remove(index);
     }
-    ui.menu_button(
-        match language {
-            Language::Chinese => "+ 添加断言",
-            Language::English => "+ Add assertion",
-        },
-        |ui| {
-            for kind in 0..6 {
-                if ui.button(assertion_kind_label(kind, language)).clicked() {
-                    rules.push(new_assertion_rule(kind));
-                    ui.close();
-                }
+    ui.menu_button(tr(language, "+ 添加断言", "+ Add assertion"), |ui| {
+        for kind in 0..6 {
+            if ui.button(assertion_kind_label(kind, language)).clicked() {
+                rules.push(new_assertion_rule(kind));
+                ui.close();
             }
-        },
-    );
+        }
+    });
 }
 
 pub(crate) fn assertion_kind_label(kind: usize, language: Language) -> &'static str {
@@ -196,10 +179,7 @@ pub(crate) fn extractor_rules_editor(
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut rule.name)
-                        .hint_text(match language {
-                            Language::Chinese => "变量名",
-                            Language::English => "Variable name",
-                        })
+                        .hint_text(tr(language, "变量名", "Variable name"))
                         .desired_width(150.0),
                 );
                 egui::ComboBox::from_id_salt("source_kind")
@@ -233,10 +213,7 @@ pub(crate) fn extractor_rules_editor(
                         [26.0, 26.0],
                         egui::Button::new(theme::icon("x", 12.0)).frame(false),
                     )
-                    .on_hover_text(match language {
-                        Language::Chinese => "删除提取器",
-                        Language::English => "Delete extractor",
-                    })
+                    .on_hover_text(tr(language, "删除提取器", "Delete extractor"))
                     .clicked()
                 {
                     remove = Some(index);
@@ -250,29 +227,24 @@ pub(crate) fn extractor_rules_editor(
     if let Some(index) = remove {
         rules.remove(index);
     }
-    ui.menu_button(
-        match language {
-            Language::Chinese => "+ 添加提取器",
-            Language::English => "+ Add extractor",
-        },
-        |ui| {
-            for kind in 0..4 {
-                if ui.button(extractor_kind_label(kind, language)).clicked() {
-                    rules.push(ExtractorRule {
-                        name: String::new(),
-                        source: new_variable_source(kind),
-                    });
-                    ui.close();
-                }
+    ui.menu_button(tr(language, "+ 添加提取器", "+ Add extractor"), |ui| {
+        for kind in 0..4 {
+            if ui.button(extractor_kind_label(kind, language)).clicked() {
+                rules.push(ExtractorRule {
+                    name: String::new(),
+                    source: new_variable_source(kind),
+                });
+                ui.close();
             }
-        },
-    );
+        }
+    });
     if rules.is_empty() {
         ui.label(
-            RichText::new(match language {
-                Language::Chinese => "可将响应字段写入后续步骤变量",
-                Language::English => "Extract response values for later steps",
-            })
+            RichText::new(tr(
+                language,
+                "可将响应字段写入后续步骤变量",
+                "Extract response values for later steps",
+            ))
             .small()
             .color(palette.muted),
         );

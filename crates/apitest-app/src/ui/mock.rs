@@ -3,7 +3,7 @@ use apitest_runtime::MockServer;
 use eframe::egui::{self, RichText};
 
 use crate::app::ApiTestApp;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::state::action::PendingAction;
 use crate::theme::{self, UiExt};
 use crate::ui::request::method_combo;
@@ -15,13 +15,17 @@ impl ApiTestApp {
         if self.mock_profiles.get(self.selected_mock).is_none() {
             empty_state(
                 ui,
-                self.tr("暂无 Mock 服务", "No mock servers"),
-                self.tr(
+                tr(self.language, "暂无 Mock 服务", "No mock servers"),
+                tr(
+                    self.language,
                     "新建 Mock 后可从 API 契约智能生成响应",
                     "Create a mock to generate responses from API contracts",
                 ),
             );
-            if ui.button(self.tr("新建 Mock", "New mock")).clicked() {
+            if ui
+                .button(tr(self.language, "新建 Mock", "New mock"))
+                .clicked()
+            {
                 self.perform_action(PendingAction::NewMock);
             }
             return;
@@ -53,32 +57,24 @@ impl ApiTestApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if running {
                             if ui
-                                .button(match self.language {
-                                    Language::Chinese => "停止服务",
-                                    Language::English => "Stop server",
-                                })
+                                .button(tr(self.language, "停止服务", "Stop server"))
                                 .clicked()
                             {
                                 stop = true;
                             }
                         } else if ui
-                            .button(match self.language {
-                                Language::Chinese => "启动服务",
-                                Language::English => "Start server",
-                            })
+                            .button(tr(self.language, "启动服务", "Start server"))
                             .clicked()
                         {
                             start = true;
                         }
                         if ui
-                            .button(match self.language {
-                                Language::Chinese => "智能生成",
-                                Language::English => "Smart generate",
-                            })
-                            .on_hover_text(match self.language {
-                                Language::Chinese => "从 HTTP 契约新增尚不存在的规则",
-                                Language::English => "Add missing rules from HTTP contracts",
-                            })
+                            .button(tr(self.language, "智能生成", "Smart generate"))
+                            .on_hover_text(tr(
+                                self.language,
+                                "从 HTTP 契约新增尚不存在的规则",
+                                "Add missing rules from HTTP contracts",
+                            ))
                             .clicked()
                         {
                             generate = true;
@@ -86,10 +82,7 @@ impl ApiTestApp {
                         if ui
                             .add_enabled(
                                 dirty,
-                                egui::Button::new(match self.language {
-                                    Language::Chinese => "保存",
-                                    Language::English => "Save",
-                                }),
+                                egui::Button::new(tr(self.language, "保存", "Save")),
                             )
                             .clicked()
                         {
@@ -98,18 +91,12 @@ impl ApiTestApp {
                     });
                 });
                 ui.horizontal(|ui| {
-                    ui.label(match self.language {
-                        Language::Chinese => "监听地址",
-                        Language::English => "Bind address",
-                    });
+                    ui.label(tr(self.language, "监听地址", "Bind address"));
                     ui.add_enabled(
                         !running,
                         egui::TextEdit::singleline(&mut profile.bind_address).desired_width(150.0),
                     );
-                    ui.label(match self.language {
-                        Language::Chinese => "端口",
-                        Language::English => "Port",
-                    });
+                    ui.label(tr(self.language, "端口", "Port"));
                     ui.add_enabled(
                         !running,
                         egui::DragValue::new(&mut profile.port).range(0..=u16::MAX),
@@ -148,10 +135,11 @@ pub(crate) fn mock_rules_editor(
     let palette = ui.palette();
     if running {
         ui.label(
-            RichText::new(match language {
-                Language::Chinese => "服务运行期间配置已锁定，停止服务后可编辑",
-                Language::English => "Configuration is locked while the server is running",
-            })
+            RichText::new(tr(
+                language,
+                "服务运行期间配置已锁定，停止服务后可编辑",
+                "Configuration is locked while the server is running",
+            ))
             .color(palette.warning),
         );
     }
@@ -164,22 +152,10 @@ pub(crate) fn mock_rules_editor(
                     .default_open(index == 0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.checkbox(
-                                &mut rule.enabled,
-                                match language {
-                                    Language::Chinese => "启用",
-                                    Language::English => "Enabled",
-                                },
-                            );
-                            ui.label(match language {
-                                Language::Chinese => "名称",
-                                Language::English => "Name",
-                            });
+                            ui.checkbox(&mut rule.enabled, tr(language, "启用", "Enabled"));
+                            ui.label(tr(language, "名称", "Name"));
                             ui.add(egui::TextEdit::singleline(&mut rule.name).desired_width(220.0));
-                            ui.label(match language {
-                                Language::Chinese => "优先级",
-                                Language::English => "Priority",
-                            });
+                            ui.label(tr(language, "优先级", "Priority"));
                             ui.add(egui::DragValue::new(&mut rule.priority));
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -189,10 +165,7 @@ pub(crate) fn mock_rules_editor(
                                             [26.0, 26.0],
                                             egui::Button::new(theme::icon("x", 12.0)).frame(false),
                                         )
-                                        .on_hover_text(match language {
-                                            Language::Chinese => "删除规则",
-                                            Language::English => "Delete rule",
-                                        })
+                                        .on_hover_text(tr(language, "删除规则", "Delete rule"))
                                         .clicked()
                                     {
                                         remove = Some(index);
@@ -209,25 +182,16 @@ pub(crate) fn mock_rules_editor(
                             );
                         });
                         ui.collapsing(
-                            match language {
-                                Language::Chinese => "请求匹配条件",
-                                Language::English => "Request matching",
-                            },
+                            tr(language, "请求匹配条件", "Request matching"),
                             |ui| {
                                 ui.label(
-                                    RichText::new(match language {
-                                        Language::Chinese => "查询参数",
-                                        Language::English => "Query parameters",
-                                    })
-                                    .strong(),
+                                    RichText::new(tr(language, "查询参数", "Query parameters"))
+                                        .strong(),
                                 );
                                 mock_key_value_editor(ui, &mut rule.query, language);
                                 ui.label(
-                                    RichText::new(match language {
-                                        Language::Chinese => "请求头",
-                                        Language::English => "Request headers",
-                                    })
-                                    .strong(),
+                                    RichText::new(tr(language, "请求头", "Request headers"))
+                                        .strong(),
                                 );
                                 mock_key_value_editor(ui, &mut rule.headers, language);
                                 let mut path_variables = rule
@@ -236,21 +200,15 @@ pub(crate) fn mock_rules_editor(
                                     .map(|(name, value)| (name.clone(), value.clone()))
                                     .collect::<Vec<_>>();
                                 ui.label(
-                                    RichText::new(match language {
-                                        Language::Chinese => "路径变量",
-                                        Language::English => "Path variables",
-                                    })
-                                    .strong(),
+                                    RichText::new(tr(language, "路径变量", "Path variables"))
+                                        .strong(),
                                 );
                                 string_pair_editor(ui, &mut path_variables, language);
                                 rule.path_variables = path_variables.into_iter().collect();
                                 let mut body_contains =
                                     rule.body_contains.clone().unwrap_or_default();
                                 ui.horizontal(|ui| {
-                                    ui.label(match language {
-                                        Language::Chinese => "正文包含",
-                                        Language::English => "Body contains",
-                                    });
+                                    ui.label(tr(language, "正文包含", "Body contains"));
                                     ui.add(
                                         egui::TextEdit::singleline(&mut body_contains)
                                             .desired_width(ui.available_width()),
@@ -260,71 +218,48 @@ pub(crate) fn mock_rules_editor(
                                     (!body_contains.is_empty()).then_some(body_contains);
                             },
                         );
-                        ui.collapsing(
-                            match language {
-                                Language::Chinese => "响应配置",
-                                Language::English => "Response",
-                            },
-                            |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(match language {
-                                        Language::Chinese => "状态码",
-                                        Language::English => "Status",
-                                    });
-                                    ui.add(
-                                        egui::DragValue::new(&mut rule.response.status)
-                                            .range(100..=599),
-                                    );
-                                    ui.label(match language {
-                                        Language::Chinese => "延迟",
-                                        Language::English => "Delay",
-                                    });
-                                    ui.add(
-                                        egui::DragValue::new(&mut rule.response.delay_ms)
-                                            .range(0..=3_600_000),
-                                    );
-                                    ui.label("ms");
-                                });
-                                ui.label(
-                                    RichText::new(match language {
-                                        Language::Chinese => "响应头",
-                                        Language::English => "Response headers",
-                                    })
-                                    .strong(),
-                                );
-                                mock_key_value_editor(ui, &mut rule.response.headers, language);
-                                ui.label(
-                                    RichText::new(match language {
-                                        Language::Chinese => "响应正文",
-                                        Language::English => "Response body",
-                                    })
-                                    .strong(),
-                                );
+                        ui.collapsing(tr(language, "响应配置", "Response"), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(tr(language, "状态码", "Status"));
                                 ui.add(
-                                    egui::TextEdit::multiline(&mut rule.response.body)
-                                        .code_editor()
-                                        .desired_rows(8)
-                                        .desired_width(f32::INFINITY),
+                                    egui::DragValue::new(&mut rule.response.status)
+                                        .range(100..=599),
                                 );
-                                ui.label(
-                                    RichText::new(match language {
-                                        Language::Chinese => "动态脚本",
-                                        Language::English => "Dynamic script",
-                                    })
-                                    .strong(),
-                                );
+                                ui.label(tr(language, "延迟", "Delay"));
                                 ui.add(
-                                    egui::TextEdit::multiline(&mut rule.response.script)
-                                        .code_editor()
-                                        .desired_rows(5)
-                                        .hint_text(match language {
-                                            Language::Chinese => "可选响应脚本",
-                                            Language::English => "Optional response script",
-                                        })
-                                        .desired_width(f32::INFINITY),
+                                    egui::DragValue::new(&mut rule.response.delay_ms)
+                                        .range(0..=3_600_000),
                                 );
-                            },
-                        );
+                                ui.label("ms");
+                            });
+                            ui.label(
+                                RichText::new(tr(language, "响应头", "Response headers")).strong(),
+                            );
+                            mock_key_value_editor(ui, &mut rule.response.headers, language);
+                            ui.label(
+                                RichText::new(tr(language, "响应正文", "Response body")).strong(),
+                            );
+                            ui.add(
+                                egui::TextEdit::multiline(&mut rule.response.body)
+                                    .code_editor()
+                                    .desired_rows(8)
+                                    .desired_width(f32::INFINITY),
+                            );
+                            ui.label(
+                                RichText::new(tr(language, "动态脚本", "Dynamic script")).strong(),
+                            );
+                            ui.add(
+                                egui::TextEdit::multiline(&mut rule.response.script)
+                                    .code_editor()
+                                    .desired_rows(5)
+                                    .hint_text(tr(
+                                        language,
+                                        "可选响应脚本",
+                                        "Optional response script",
+                                    ))
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
                     });
             });
             ui.separator();
@@ -335,10 +270,7 @@ pub(crate) fn mock_rules_editor(
         if ui
             .button(theme::icon_label(
                 "plus",
-                match language {
-                    Language::Chinese => "添加 Mock 规则",
-                    Language::English => "Add mock rule",
-                },
+                tr(language, "添加 Mock 规则", "Add mock rule"),
                 12.0,
                 palette.text,
             ))
@@ -369,18 +301,12 @@ pub(crate) fn mock_key_value_editor(
                 ui.checkbox(&mut value.enabled, "");
                 ui.add(
                     egui::TextEdit::singleline(&mut value.name)
-                        .hint_text(match language {
-                            Language::Chinese => "名称",
-                            Language::English => "Name",
-                        })
+                        .hint_text(tr(language, "名称", "Name"))
                         .desired_width(180.0),
                 );
                 ui.add(
                     egui::TextEdit::singleline(&mut value.value)
-                        .hint_text(match language {
-                            Language::Chinese => "值",
-                            Language::English => "Value",
-                        })
+                        .hint_text(tr(language, "值", "Value"))
                         .desired_width(260.0),
                 );
                 if ui
@@ -398,13 +324,7 @@ pub(crate) fn mock_key_value_editor(
     if let Some(index) = remove {
         values.remove(index);
     }
-    if ui
-        .small_button(match language {
-            Language::Chinese => "+ 添加",
-            Language::English => "+ Add",
-        })
-        .clicked()
-    {
+    if ui.small_button(tr(language, "+ 添加", "+ Add")).clicked() {
         values.push(KeyValue::enabled("", ""));
     }
     if values.is_empty() {
@@ -424,18 +344,12 @@ pub(crate) fn string_pair_editor(
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(name)
-                        .hint_text(match language {
-                            Language::Chinese => "变量名",
-                            Language::English => "Variable",
-                        })
+                        .hint_text(tr(language, "变量名", "Variable"))
                         .desired_width(180.0),
                 );
                 ui.add(
                     egui::TextEdit::singleline(value)
-                        .hint_text(match language {
-                            Language::Chinese => "匹配值",
-                            Language::English => "Expected value",
-                        })
+                        .hint_text(tr(language, "匹配值", "Expected value"))
                         .desired_width(260.0),
                 );
                 if ui
@@ -453,13 +367,7 @@ pub(crate) fn string_pair_editor(
     if let Some(index) = remove {
         values.remove(index);
     }
-    if ui
-        .small_button(match language {
-            Language::Chinese => "+ 添加",
-            Language::English => "+ Add",
-        })
-        .clicked()
-    {
+    if ui.small_button(tr(language, "+ 添加", "+ Add")).clicked() {
         values.push((String::new(), String::new()));
     }
     if values.is_empty() {
