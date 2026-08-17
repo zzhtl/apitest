@@ -114,6 +114,10 @@ impl ApiTestApp {
             if let Some(index) = self.requests.iter().position(|request| request.id() == id) {
                 self.requests.remove(index);
             }
+            self.sessions.close(DocumentId {
+                kind: DocumentKind::Api,
+                entity_id: id,
+            });
             self.document_tabs.close(DocumentId {
                 kind: DocumentKind::Api,
                 entity_id: id,
@@ -292,7 +296,7 @@ impl ApiTestApp {
                 .filter_map(|variable| variable.secret_ref.clone()),
         );
         self.cleanup_secret_references(references);
-        self.invalidate_run();
+        self.invalidate_scenario_run();
         self.requests.remove(index);
         self.selected = self.selected.min(self.requests.len().saturating_sub(1));
         self.close_document(DocumentId {

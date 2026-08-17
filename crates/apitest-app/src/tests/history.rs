@@ -38,7 +38,17 @@ fn execution_history_externalizes_and_redacts_streamed_response_bodies() {
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
         harness.state_mut().drain_runtime();
-        if harness.state().history_record.is_none() {
+        let document = harness
+            .state()
+            .active_api_document()
+            .expect("a request is selected");
+        if harness
+            .state_mut()
+            .sessions
+            .entry(document)
+            .history_record
+            .is_none()
+        {
             break;
         }
         assert!(

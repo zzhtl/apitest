@@ -76,6 +76,9 @@ impl ApiTestApp {
         let mut send = false;
         let mut stop = false;
         let mut editor_error = None;
+        let running = self.session().response.is_active();
+        let stopping = self.session().response.state == RunState::Cancelling;
+        let mut editor_tab = self.session().editor_tab;
         egui::Frame::new()
             .fill(palette.surface)
             .inner_margin(pad::COMPOSER)
@@ -216,8 +219,7 @@ impl ApiTestApp {
                     })
                     .response
                     .on_hover_text(settings_tip);
-                    if self.response.is_active() {
-                        let stopping = self.response.state == RunState::Cancelling;
+                    if running {
                         if ui
                             .add_enabled(
                                 !stopping,
@@ -255,13 +257,13 @@ impl ApiTestApp {
                 ui.add_space(6.0);
                 editor_tabs(
                     ui,
-                    &mut self.editor_tab,
+                    &mut editor_tab,
                     self.language,
                     &self.requests[index].draft,
                 );
                 ui.separator();
                 let language = self.language;
-                match self.editor_tab {
+                match editor_tab {
                     EditorTab::Params => {
                         editable_pairs(ui, &mut self.requests[index].draft.query, language, true)
                     }
@@ -286,6 +288,7 @@ impl ApiTestApp {
                 }
                 self.requests[index].draft.ensure_empty_rows();
             });
+        self.session_mut().editor_tab = editor_tab;
         if let Some(error) = editor_error {
             self.toast(ToastKind::Error, error);
         }
@@ -313,6 +316,7 @@ impl ApiTestApp {
         let mut delete = false;
         let mut send = false;
         let mut stop = false;
+        let running = self.session().response.is_active();
         egui::Frame::new()
             .fill(palette.surface)
             .inner_margin(pad::COMPOSER)
@@ -357,7 +361,7 @@ impl ApiTestApp {
                         {
                             save = true;
                         }
-                        if self.response.is_active() {
+                        if running {
                             if ui
                                 .button(theme::icon_label(
                                     "circle-stop",

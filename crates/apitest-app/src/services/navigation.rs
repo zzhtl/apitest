@@ -37,7 +37,7 @@ impl ApiTestApp {
         match action {
             PendingAction::SelectRequest(id) => {
                 if let Some(index) = self.requests.iter().position(|request| request.id() == id) {
-                    self.invalidate_run();
+                    self.invalidate_scenario_run();
                     self.selected = index;
                     self.navigation = Navigation::Api;
                     self.open_document(
@@ -50,7 +50,7 @@ impl ApiTestApp {
                 }
             }
             PendingAction::NewRequest(kind) => {
-                self.invalidate_run();
+                self.invalidate_scenario_run();
                 self.requests.push(WorkspaceRequest::new_protocol(
                     self.tr("未命名请求", "Untitled request"),
                     kind,
@@ -69,7 +69,7 @@ impl ApiTestApp {
             }
             PendingAction::SelectScenario(id) => {
                 if let Some(index) = self.scenarios.iter().position(|scenario| scenario.id == id) {
-                    self.invalidate_run();
+                    self.invalidate_scenario_run();
                     self.selected_scenario = index;
                     self.navigation = Navigation::Scenario;
                     let name = self.scenarios[index].name.clone();
@@ -107,7 +107,7 @@ impl ApiTestApp {
                     .iter()
                     .position(|profile| profile.id == id)
                 {
-                    self.invalidate_run();
+                    self.invalidate_scenario_run();
                     self.selected_mock = index;
                     self.navigation = Navigation::Mock;
                     let name = self.mock_profiles[index].name.clone();
@@ -142,7 +142,7 @@ impl ApiTestApp {
             PendingAction::NewProject => self.create_project(),
             PendingAction::Navigate(navigation) => {
                 if navigation == Navigation::Environment {
-                    self.invalidate_run();
+                    self.invalidate_scenario_run();
                 }
                 self.navigation = navigation;
                 match navigation {
@@ -297,7 +297,7 @@ impl ApiTestApp {
         else {
             return;
         };
-        self.invalidate_run();
+        self.invalidate_scenario_run();
         let (requests, environments, mut resource_pages, mut errors) =
             load_project_content(self.database.as_deref(), &project, self.language);
         let (scenarios, mock_profiles, automation_errors) =
@@ -342,6 +342,7 @@ impl ApiTestApp {
         );
         let active_document = document_tabs.active();
 
+        self.sessions.clear();
         self.project = project;
         self.requests = requests;
         self.environments = environments;

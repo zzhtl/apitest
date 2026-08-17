@@ -9,6 +9,7 @@ use crate::draft::BodyMode;
 use crate::services::secrets::sensitive_name;
 use crate::state::action::ToastKind;
 use crate::state::response::MAX_RESPONSE_BYTES;
+use crate::workbench::DocumentId;
 
 pub(crate) const HISTORY_MAX_RECORDS: usize = 200;
 
@@ -83,8 +84,24 @@ impl ApiTestApp {
         values
     }
 
-    pub(crate) fn begin_run_history(&mut self, request_case_id: EntityId, redactions: Vec<String>) {
-        self.history_record = Some(RunRecord {
+    pub(crate) fn begin_run_history(
+        &mut self,
+        document: DocumentId,
+        request_case_id: EntityId,
+        redactions: Vec<String>,
+    ) {
+        let sink = match self.body_store.as_ref() {
+            Some(store) => match store.begin_redacted(&redactions) {
+                Ok(sink) => Some(sink),
+                Err(error) => {
+                    self.toast(ToastKind::Error, error.to_string());
+                    None
+                }
+            },
+            None => None,
+        };
+        let session = self.sessions.entry(document);
+        session.history_record = Some(RunRecord {
             id: EntityId::new(),
             request_case_id: Some(request_case_id),
             state: HistoryRunState::Running,
@@ -96,26 +113,18 @@ impl ApiTestApp {
             started_at: Utc::now(),
             finished_at: None,
         });
-        self.history_redactions = redactions;
-        self.history_body = match self.body_store.as_ref() {
-            Some(store) => match store.begin_redacted(&self.history_redactions) {
-                Ok(sink) => Some(sink),
-                Err(error) => {
-                    self.toast(ToastKind::Error, error.to_string());
-                    None
-                }
-            },
-            None => None,
-        };
+        session.history_redactions = redactions;
+        session.history_body = sink;
     }
 
-    pub(crate) fn write_run_history_body(&mut self, bytes: &[u8]) {
-        let error = self
+    pub(crate) fn write_run_history_body(&mut self, document: DocumentId, bytes: &[u8]) {
+        let session = self.sessions.entry(document);
+        let error = session
             .history_body
             .as_mut()
             .and_then(|sink| sink.write_all(bytes).err());
         if let Some(error) = error {
-            self.history_body = None;
+            session.history_body = None;
             self.toast(
                 ToastKind::Error,
                 format!("failed to store response body: {error}"),
@@ -125,16 +134,19 @@ impl ApiTestApp {
 
     pub(crate) fn finish_run_history(
         &mut self,
+        document: DocumentId,
         state: HistoryRunState,
         metrics: Option<ExecutionMetrics>,
         error: Option<String>,
     ) {
-        let Some(mut record) = self.history_record.take() else {
-            self.history_body = None;
-            self.history_redactions.clear();
+        let session = self.sessions.entry(document);
+        let status_code = session.response.status;
+        let redactions = std::mem::take(&mut session.history_redactions);
+        let Some(mut record) = session.history_record.take() else {
+            session.history_body = None;
             return;
         };
-        let body = match self.history_body.take() {
+        let body = match session.history_body.take() {
             Some(sink) => match sink.commit() {
                 Ok(body) => Some(body),
                 Err(storage_error) => {
@@ -146,7 +158,7 @@ impl ApiTestApp {
         };
         let finished_at = Utc::now();
         record.state = state;
-        record.status_code = self.response.status;
+        record.status_code = status_code;
         record.elapsed_ms = metrics
             .map(|metrics| metrics.elapsed_ms)
             .unwrap_or_else(|| (finished_at - record.started_at).num_milliseconds().max(0) as u64);
@@ -155,9 +167,8 @@ impl ApiTestApp {
             .or_else(|| body.as_ref().map(|body| body.size))
             .unwrap_or_default();
         record.body_path = body.as_ref().map(|body| body.path.display().to_string());
-        record.error = error.map(|error| redact_text(&error, &self.history_redactions));
+        record.error = error.map(|error| redact_text(&error, &redactions));
         record.finished_at = Some(finished_at);
-        self.history_redactions.clear();
 
         let Some(database) = self.database.clone() else {
             if let (Some(store), Some(body)) = (&self.body_store, body.as_ref()) {

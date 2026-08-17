@@ -71,7 +71,7 @@ fn advanced_authentication_modes_expose_editable_fields() {
         .with_size(egui::vec2(1280.0, 800.0))
         .build_eframe(test_app);
     let request_id = harness.state().requests[0].id();
-    harness.state_mut().editor_tab = EditorTab::Auth;
+    harness.state_mut().session_mut().editor_tab = EditorTab::Auth;
 
     for (mode, field) in [
         (AuthMode::OAuth2, "Token 地址"),

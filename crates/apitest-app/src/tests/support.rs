@@ -22,8 +22,8 @@ use crate::environment::EnvironmentDraft;
 use crate::i18n::Language;
 use crate::persistence::StorageWorker;
 use crate::state::action::{OpenApiPreviewTab, Toasts};
-use crate::state::response::{ResponseBodyMode, ResponseTab, ResponseView};
-use crate::state::workspace::{EditorTab, Navigation, ResourcePage, WorkspaceRequest};
+use crate::state::session::{DocumentSession, Sessions};
+use crate::state::workspace::{Navigation, ResourcePage, WorkspaceRequest};
 use crate::theme;
 use crate::theme::ThemeMode;
 use crate::workbench::{DocumentId, DocumentKind, DocumentTabs};
@@ -178,9 +178,6 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         secrets,
         database: Some(database),
         body_store: None,
-        history_body: None,
-        history_record: None,
-        history_redactions: Vec::new(),
         run_records: Vec::new(),
         selected_history: 0,
         history_body_preview: String::new(),
@@ -207,16 +204,10 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         selected_environment: 0,
         active_environment: environment_id,
         navigation: Navigation::Api,
-        editor_tab: EditorTab::Params,
-        response_tab: ResponseTab::Body,
-        response_body_mode: ResponseBodyMode::Pretty,
-        response: ResponseView::default(),
+        sessions: Sessions::default(),
+        idle_session: DocumentSession::default(),
         sender,
         receiver,
-        cancellation: None,
-        execution_commands: None,
-        websocket_message: String::new(),
-        run_id: 0,
         theme: ThemeMode::Dark,
         language: Language::Chinese,
         search: String::new(),

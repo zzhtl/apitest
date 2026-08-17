@@ -5,10 +5,37 @@ use crate::environment::EnvironmentDraft;
 use crate::i18n;
 use crate::services::loader::document_tabs_setting;
 use crate::state::action::ToastKind;
+use crate::state::session::DocumentSession;
 use crate::state::workspace::{Navigation, WorkspaceRequest};
 use crate::workbench::{DocumentId, DocumentKind};
 
 impl ApiTestApp {
+    /// The document whose session owns the response area right now.
+    pub(crate) fn active_api_document(&self) -> Option<DocumentId> {
+        self.requests.get(self.selected).map(|request| DocumentId {
+            kind: DocumentKind::Api,
+            entity_id: request.id(),
+        })
+    }
+
+    /// Read-only view of the active tab's session, or the idle default when no
+    /// request is selected.
+    pub(crate) fn session(&self) -> &DocumentSession {
+        self.active_api_document()
+            .and_then(|id| self.sessions.get(id))
+            .unwrap_or(&self.idle_session)
+    }
+
+    /// The active tab's session, creating it on first use.
+    pub(crate) fn session_mut(&mut self) -> &mut DocumentSession {
+        match self.active_api_document() {
+            Some(id) => self.sessions.entry(id),
+            // No request selected: writes land in a scratch session that is
+            // never drawn, which keeps every caller free of an Option.
+            None => &mut self.idle_session,
+        }
+    }
+
     pub(crate) fn tr<'a>(&self, chinese: &'a str, english: &'a str) -> &'a str {
         i18n::tr(self.language, chinese, english)
     }
@@ -47,7 +74,7 @@ impl ApiTestApp {
                 else {
                     return false;
                 };
-                self.invalidate_run();
+                self.invalidate_scenario_run();
                 self.selected = index;
                 self.navigation = Navigation::Api;
                 true
@@ -60,7 +87,7 @@ impl ApiTestApp {
                 else {
                     return false;
                 };
-                self.invalidate_run();
+                self.invalidate_scenario_run();
                 self.selected_environment = index;
                 self.navigation = Navigation::Environment;
                 true
@@ -73,7 +100,7 @@ impl ApiTestApp {
                 else {
                     return false;
                 };
-                self.invalidate_run();
+                self.invalidate_scenario_run();
                 self.selected_scenario = index;
                 self.navigation = Navigation::Scenario;
                 true
@@ -86,7 +113,7 @@ impl ApiTestApp {
                 else {
                     return false;
                 };
-                self.invalidate_run();
+                self.invalidate_scenario_run();
                 self.selected_mock = index;
                 self.navigation = Navigation::Mock;
                 true
@@ -101,6 +128,9 @@ impl ApiTestApp {
     }
 
     pub(crate) fn close_document(&mut self, id: DocumentId) {
+        // Closing the tab abandons whatever it was streaming; nothing else can
+        // observe that session any more.
+        self.sessions.close(id);
         let active = self.document_tabs.close(id);
         self.persist_document_tabs();
         if let Some(active) = active {

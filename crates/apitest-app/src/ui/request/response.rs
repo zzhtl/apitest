@@ -1,13 +1,13 @@
 use apitest_core::ProtocolKind;
-use eframe::egui::{self, CornerRadius, RichText, Stroke};
+use eframe::egui::{self, RichText, Stroke};
 use egui_extras::{Column, TableBuilder};
 
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::state::response::{ResponseBodyMode, ResponseTab, TimelineEntry, TimelinePhase};
-use crate::theme::tokens::icon as icon_size;
+use crate::theme::tokens::radius;
 use crate::theme::{self, UiExt};
-use crate::ui::widgets::{Tone, badge, empty_state, tab_button};
+use crate::ui::widgets::{Tone, badge, empty_state, icon_button, tab_button};
 
 impl ApiTestApp {
     pub(crate) fn response_panel(&mut self, ui: &mut egui::Ui) {
@@ -16,21 +16,23 @@ impl ApiTestApp {
             .requests
             .get(self.selected)
             .is_some_and(|request| request.protocol_kind() == ProtocolKind::WebSocket);
+        let mut selected_tab = self.session().response_tab;
         ui.horizontal(|ui| {
             for (tab, chinese, english) in [
                 (ResponseTab::Body, "响应体", "Body"),
                 (ResponseTab::Headers, "响应头", "Headers"),
                 (ResponseTab::Timeline, "时间线", "Timeline"),
             ] {
-                if tab_button(ui, self.response_tab == tab, self.tr(chinese, english)).clicked() {
-                    self.response_tab = tab;
+                if tab_button(ui, selected_tab == tab, self.tr(chinese, english)).clicked() {
+                    selected_tab = tab;
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.response.is_active() {
+                let response = &self.session().response;
+                if response.is_active() {
                     ui.spinner();
                 }
-                if let Some(metrics) = self.response.metrics {
+                if let Some(metrics) = response.metrics {
                     ui.label(
                         RichText::new(format!(
                             "{} ms  ·  ↓ {} B  ·  ↑ {} B",
@@ -39,40 +41,47 @@ impl ApiTestApp {
                         .color(palette.muted),
                     );
                 }
-                if let Some(version) = &self.response.version {
+                if let Some(version) = &response.version {
                     ui.label(RichText::new(version).color(palette.muted));
                 }
-                if let Some(status) = self.response.status {
+                if let Some(status) = response.status {
                     badge(ui, status.to_string(), status_tone(status));
                 }
             });
         });
+        self.session_mut().response_tab = selected_tab;
         if websocket_selected {
             self.websocket_message_bar(ui);
         }
         ui.separator();
-        if let Some(error) = &self.response.error {
+        if let Some(error) = self.session().response.error.clone() {
             egui::Frame::new()
                 .fill(palette.primary_soft)
                 .stroke(Stroke::new(1.0, palette.danger))
-                .corner_radius(CornerRadius::same(5))
+                .corner_radius(radius::SM)
                 .inner_margin(8)
                 .show(ui, |ui| {
                     ui.label(RichText::new(error).color(palette.danger));
                 });
             ui.add_space(6.0);
         }
-        match self.response_tab {
+        match selected_tab {
             ResponseTab::Body => self.response_body(ui),
-            ResponseTab::Headers => response_headers(ui, &self.response.headers, self.language),
-            ResponseTab::Timeline => response_timeline(ui, &self.response.timeline, self.language),
+            ResponseTab::Headers => {
+                let headers = self.session().response.headers.clone();
+                response_headers(ui, &headers, self.language);
+            }
+            ResponseTab::Timeline => {
+                let timeline = self.session().response.timeline.clone();
+                response_timeline(ui, &timeline, self.language);
+            }
         }
     }
 
     pub(crate) fn websocket_message_bar(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
-        let connected = self.execution_commands.is_some();
-        let can_send = connected && !self.websocket_message.trim().is_empty();
+        let connected = self.session().execution_commands.is_some();
+        let can_send = connected && !self.session().websocket_message.trim().is_empty();
         let message_hint = self
             .tr("输入 WebSocket 文本消息", "Enter a WebSocket text message")
             .to_owned();
@@ -94,10 +103,12 @@ impl ApiTestApp {
                 }),
             );
             let width = (ui.available_width() - 220.0).max(160.0);
+            let mut message = std::mem::take(&mut self.session_mut().websocket_message);
             let response = ui.add_sized(
                 [width, 30.0],
-                egui::TextEdit::singleline(&mut self.websocket_message).hint_text(message_hint),
+                egui::TextEdit::singleline(&mut message).hint_text(message_hint),
             );
+            self.session_mut().websocket_message = message;
             if response.lost_focus()
                 && ui.input(|input| input.key_pressed(egui::Key::Enter))
                 && can_send
@@ -138,7 +149,7 @@ impl ApiTestApp {
 
     pub(crate) fn response_body(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
-        if self.response.body.is_empty() && !self.response.is_active() {
+        if self.session().response.body.is_empty() && !self.session().response.is_active() {
             empty_state(
                 ui,
                 self.tr("暂无响应", "No response yet"),
@@ -149,47 +160,34 @@ impl ApiTestApp {
             );
             return;
         }
+        let mut mode = self.session().response_body_mode;
+        let body = {
+            let response = &self.session().response;
+            response
+                .pretty_body
+                .as_ref()
+                .filter(|_| mode == ResponseBodyMode::Pretty)
+                .unwrap_or(&response.body)
+                .clone()
+        };
         ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut self.response_body_mode,
-                ResponseBodyMode::Pretty,
-                "Pretty",
-            );
-            ui.selectable_value(&mut self.response_body_mode, ResponseBodyMode::Raw, "Raw");
+            ui.selectable_value(&mut mode, ResponseBodyMode::Pretty, "Pretty");
+            ui.selectable_value(&mut mode, ResponseBodyMode::Raw, "Raw");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_sized(
-                        [28.0, 28.0],
-                        egui::Button::new(theme::icon("copy", icon_size::MD)),
-                    )
-                    .on_hover_text(self.tr("复制响应", "Copy response"))
-                    .clicked()
-                {
-                    let text = self
-                        .response
-                        .pretty_body
-                        .as_ref()
-                        .filter(|_| self.response_body_mode == ResponseBodyMode::Pretty)
-                        .unwrap_or(&self.response.body)
-                        .clone();
-                    ui.ctx().copy_text(text);
+                if icon_button(ui, "copy", self.tr("复制响应", "Copy response")).clicked() {
+                    ui.ctx().copy_text(body.clone());
                 }
             });
         });
-        let body = self
-            .response
-            .pretty_body
-            .as_ref()
-            .filter(|_| self.response_body_mode == ResponseBodyMode::Pretty)
-            .unwrap_or(&self.response.body);
+        self.session_mut().response_body_mode = mode;
         egui::ScrollArea::both().show(ui, |ui| {
             ui.add(
-                egui::Label::new(RichText::new(body).monospace().color(palette.text))
+                egui::Label::new(RichText::new(&body).monospace().color(palette.text))
                     .selectable(true)
                     .wrap_mode(egui::TextWrapMode::Extend),
             );
         });
-        if self.response.truncated {
+        if self.session().response.truncated {
             ui.colored_label(
                 palette.warning,
                 self.tr(

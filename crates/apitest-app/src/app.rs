@@ -4,16 +4,13 @@ use std::{
 };
 
 use apitest_core::{
-    EntityId, ExecutionCommand, MockProfile, Project, ProtocolExecutor, ProtocolKind, RunRecord,
-    TestScenario,
+    EntityId, MockProfile, Project, ProtocolExecutor, ProtocolKind, RunRecord, TestScenario,
 };
 use apitest_interop::OpenApiIssue;
 use apitest_runtime::{
     ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, ScenarioReport, WebSocketExecutor,
 };
-use apitest_storage::{
-    BodyStore, Database, PageRequest, RedactingBodySink, SecretStore, SystemSecretStore,
-};
+use apitest_storage::{BodyStore, Database, PageRequest, SecretStore, SystemSecretStore};
 use eframe::egui::{self, Stroke};
 use tokio_util::sync::CancellationToken;
 
@@ -29,8 +26,8 @@ use crate::services::loader::{
 use crate::state::action::{
     Confirmation, OpenApiPreviewTab, PendingAction, RuntimeMessage, ToastKind, Toasts,
 };
-use crate::state::response::{ResponseBodyMode, ResponseTab, ResponseView};
-use crate::state::workspace::{EditorTab, Navigation, ResourcePage, WorkspaceRequest};
+use crate::state::session::{DocumentSession, Sessions};
+use crate::state::workspace::{Navigation, ResourcePage, WorkspaceRequest};
 use crate::theme::tokens::size;
 use crate::theme::{self, ThemeMode, UiExt};
 use crate::workbench::{DocumentKind, DocumentTabs};
@@ -51,9 +48,6 @@ pub struct ApiTestApp {
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) database: Option<Arc<Database>>,
     pub(crate) body_store: Option<BodyStore>,
-    pub(crate) history_body: Option<RedactingBodySink>,
-    pub(crate) history_record: Option<RunRecord>,
-    pub(crate) history_redactions: Vec<String>,
     pub(crate) run_records: Vec<RunRecord>,
     pub(crate) selected_history: usize,
     pub(crate) history_body_preview: String,
@@ -80,16 +74,12 @@ pub struct ApiTestApp {
     pub(crate) selected_environment: usize,
     pub(crate) active_environment: EntityId,
     pub(crate) navigation: Navigation,
-    pub(crate) editor_tab: EditorTab,
-    pub(crate) response_tab: ResponseTab,
-    pub(crate) response_body_mode: ResponseBodyMode,
-    pub(crate) response: ResponseView,
+    /// Per-tab editor selection, response and in-flight run.
+    pub(crate) sessions: Sessions,
+    /// Scratch session used while no request is selected.
+    pub(crate) idle_session: DocumentSession,
     pub(crate) sender: mpsc::Sender<RuntimeMessage>,
     pub(crate) receiver: mpsc::Receiver<RuntimeMessage>,
-    pub(crate) cancellation: Option<CancellationToken>,
-    pub(crate) execution_commands: Option<tokio::sync::mpsc::Sender<ExecutionCommand>>,
-    pub(crate) websocket_message: String,
-    pub(crate) run_id: u64,
     pub(crate) theme: ThemeMode,
     pub(crate) language: Language,
     pub(crate) search: String,
@@ -264,9 +254,6 @@ impl ApiTestApp {
             secrets,
             database,
             body_store,
-            history_body: None,
-            history_record: None,
-            history_redactions: Vec::new(),
             run_records,
             selected_history: 0,
             history_body_preview: String::new(),
@@ -293,16 +280,10 @@ impl ApiTestApp {
             selected_environment,
             active_environment,
             navigation,
-            editor_tab: EditorTab::Params,
-            response_tab: ResponseTab::Body,
-            response_body_mode: ResponseBodyMode::Pretty,
-            response: ResponseView::default(),
+            sessions: Sessions::default(),
+            idle_session: DocumentSession::default(),
             sender,
             receiver,
-            cancellation: None,
-            execution_commands: None,
-            websocket_message: String::new(),
-            run_id: 0,
             theme,
             language,
             search: String::new(),

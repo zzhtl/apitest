@@ -21,8 +21,9 @@ pub(crate) enum Navigation {
     Environment,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditorTab {
+    #[default]
     Params,
     Headers,
     Cookies,

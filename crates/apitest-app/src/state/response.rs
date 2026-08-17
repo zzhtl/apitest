@@ -4,15 +4,17 @@ use apitest_core::ExecutionMetrics;
 
 pub(crate) const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResponseTab {
+    #[default]
     Body,
     Headers,
     Timeline,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResponseBodyMode {
+    #[default]
     Pretty,
     Raw,
 }
