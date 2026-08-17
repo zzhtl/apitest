@@ -31,6 +31,7 @@ pub(crate) enum EditorTab {
     Auth,
     Tests,
     Scripts,
+    Docs,
 }
 
 #[derive(Default)]

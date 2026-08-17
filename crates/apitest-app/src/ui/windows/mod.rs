@@ -46,6 +46,29 @@ impl ApiTestApp {
                         .selectable_value(&mut self.language, Language::English, "English")
                         .changed();
                 });
+                ui.add_space(12.0);
+                ui.label(RichText::new(self.tr("快捷键", "Keyboard shortcuts")).strong());
+                let muted = ui.palette().muted;
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        for (chord, chinese, english) in ApiTestApp::SHORTCUTS {
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    [120.0, 20.0],
+                                    egui::Label::new(RichText::new(*chord).monospace().small()),
+                                );
+                                ui.label(
+                                    RichText::new(match self.language {
+                                        Language::Chinese => *chinese,
+                                        Language::English => *english,
+                                    })
+                                    .small()
+                                    .color(muted),
+                                );
+                            });
+                        }
+                    });
             });
         self.show_settings = open;
         if theme_changed {

@@ -82,6 +82,13 @@ fn render_every_workspace() {
         session.response.finish_body();
         session.response_body_mode = crate::state::response::ResponseBodyMode::Tree;
     });
+    capture("docs-tab", ThemeMode::Dark, |app| {
+        app.session_mut().editor_tab = crate::state::workspace::EditorTab::Docs;
+        app.requests[0].definition.status = apitest_core::ApiStatus::Testing;
+        app.requests[0].definition.tags = vec!["orders".into(), "public".into()];
+        app.requests[0].definition.description_markdown =
+            "## 查询订单\n\n返回当前用户的订单列表。".into();
+    });
     capture("request-tests", ThemeMode::Dark, |app| {
         app.session_mut().editor_tab = crate::state::workspace::EditorTab::Tests;
         app.requests[0].request_case.assertions = vec![

@@ -2,7 +2,7 @@ pub(crate) mod response;
 
 use std::sync::Arc;
 
-use apitest_core::{HttpMethod, ProtocolKind, RequestCase};
+use apitest_core::{ApiDefinition, ApiStatus, HttpMethod, ProtocolKind, RequestCase};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 
 use crate::app::ApiTestApp;
@@ -13,6 +13,7 @@ use crate::state::response::RunState;
 use crate::state::workspace::EditorTab;
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::tokens::pad;
+use crate::theme::tokens::size;
 use crate::theme::{self, Palette, UiExt};
 use crate::ui::editors::auth::auth_editor;
 use crate::ui::editors::body::body_editor;
@@ -365,6 +366,9 @@ impl ApiTestApp {
                     EditorTab::Scripts => {
                         script_editor(ui, &mut self.requests[index].request_case, language);
                     }
+                    EditorTab::Docs => {
+                        docs_editor(ui, &mut self.requests[index].definition, language);
+                    }
                 }
                 self.requests[index].draft.ensure_empty_rows();
             });
@@ -551,6 +555,7 @@ pub(crate) fn editor_tabs(
             (EditorTab::Auth, "认证", "Auth", 0),
             (EditorTab::Tests, "测试", "Tests", checks),
             (EditorTab::Scripts, "脚本", "Scripts", scripts),
+            (EditorTab::Docs, "文档", "Docs", 0),
         ] {
             let label = tr(language, chinese, english);
             let label = if count > 0 {
@@ -600,5 +605,73 @@ fn script_editor(ui: &mut egui::Ui, case: &mut RequestCase, language: Language) 
             );
             ui.add_space(10.0);
         }
+    });
+}
+
+/// Status, tags and the Markdown description that ship with the contract.
+///
+/// `ApiDefinition` has carried these since the contract/case split, but the
+/// desktop had no way to set them.
+fn docs_editor(ui: &mut egui::Ui, definition: &mut ApiDefinition, language: Language) {
+    let palette = ui.palette();
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr(language, "状态", "Status")).strong());
+            for (status, chinese, english) in [
+                (ApiStatus::Designing, "设计中", "Designing"),
+                (ApiStatus::Developing, "开发中", "Developing"),
+                (ApiStatus::Testing, "测试中", "Testing"),
+                (ApiStatus::Released, "已发布", "Released"),
+                (ApiStatus::Deprecated, "已废弃", "Deprecated"),
+            ] {
+                ui.selectable_value(
+                    &mut definition.status,
+                    status,
+                    tr(language, chinese, english),
+                );
+            }
+        });
+        ui.add_space(8.0);
+        ui.label(RichText::new(tr(language, "标签", "Tags")).strong());
+        let mut tags = definition.tags.join(", ");
+        if ui
+            .add_sized(
+                [ui.available_width(), size::FIELD],
+                egui::TextEdit::singleline(&mut tags).hint_text(tr(
+                    language,
+                    "用逗号分隔",
+                    "Comma separated",
+                )),
+            )
+            .changed()
+        {
+            definition.tags = tags
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(tr(language, "说明（Markdown）", "Description (Markdown)")).strong(),
+        );
+        ui.label(
+            RichText::new(tr(
+                language,
+                "会写入 OpenAPI 导出和静态文档",
+                "Included in OpenAPI exports and the static documentation",
+            ))
+            .small()
+            .color(palette.muted),
+        );
+        ui.add_sized(
+            [
+                ui.available_width(),
+                (ui.available_height() - 12.0).max(120.0),
+            ],
+            egui::TextEdit::multiline(&mut definition.description_markdown)
+                .desired_width(f32::INFINITY),
+        );
     });
 }

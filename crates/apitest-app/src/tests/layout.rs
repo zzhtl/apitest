@@ -4,8 +4,11 @@ use egui_kittest::{
     kittest::{NodeT as _, Queryable as _},
 };
 
+use apitest_core::ProtocolKind;
+
 use super::support::test_app;
 use crate::i18n::Language;
+use crate::state::action::PendingAction;
 use crate::state::workspace::{EditorTab, Navigation};
 use crate::theme::ThemeMode;
 use crate::{
@@ -101,4 +104,61 @@ fn environment_navigation_exposes_real_variable_editor() {
 
     assert!(harness.query_by_label("环境变量").is_some());
     assert_eq!(harness.state().navigation, Navigation::Environment);
+}
+
+/// The shortcuts that move between tabs and close them, which previously had no
+/// bindings at all.
+#[test]
+fn tab_shortcuts_cycle_and_close_documents() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_eframe(test_app);
+    harness
+        .state_mut()
+        .perform_action(PendingAction::NewRequest(ProtocolKind::Http));
+    harness
+        .state_mut()
+        .perform_action(PendingAction::NewRequest(ProtocolKind::Http));
+    harness.run_steps(2);
+    assert_eq!(harness.state().document_tabs.items().len(), 3);
+
+    let before = harness
+        .state()
+        .document_tabs
+        .active()
+        .expect("an active tab");
+    press(&mut harness, egui::Key::Tab, egui::Modifiers::COMMAND);
+    let after = harness
+        .state()
+        .document_tabs
+        .active()
+        .expect("an active tab");
+    assert_ne!(before, after, "Ctrl Tab moves to the next document");
+
+    press(&mut harness, egui::Key::W, egui::Modifiers::COMMAND);
+    harness.run_steps(2);
+    assert_eq!(
+        harness.state().document_tabs.items().len(),
+        2,
+        "Ctrl W closes the active document",
+    );
+}
+
+fn press(
+    harness: &mut Harness<'_, crate::app::ApiTestApp>,
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+) {
+    // `InputState::modifiers` mirrors `RawInput::modifiers`, not the per-event
+    // copy, so both have to be set for a chord to register.
+    harness.input_mut().modifiers = modifiers;
+    harness.input_mut().events.push(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    });
+    harness.step();
+    harness.input_mut().modifiers = egui::Modifiers::NONE;
 }

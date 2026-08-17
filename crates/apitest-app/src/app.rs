@@ -353,6 +353,15 @@ impl eframe::App for ApiTestApp {
                     .stroke(Stroke::new(1.0, palette.divider)),
             )
             .show(ui, |ui| self.top_bar(ui));
+        egui::Panel::bottom("status_bar")
+            .exact_size(size::STATUS_BAR)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.rail_bg)
+                    .stroke(Stroke::new(1.0, palette.divider)),
+            )
+            .show(ui, |ui| self.status_bar(ui));
         egui::Panel::left("activity")
             .exact_size(size::ACTIVITY_RAIL)
             .resizable(false)

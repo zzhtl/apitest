@@ -15,6 +15,7 @@ pub(crate) mod icon {
 /// Fixed chrome and control sizes, in points.
 pub(crate) mod size {
     pub(crate) const TOP_BAR: f32 = 48.0;
+    pub(crate) const STATUS_BAR: f32 = 30.0;
     pub(crate) const ACTIVITY_RAIL: f32 = 64.0;
     pub(crate) const RAIL_BUTTON: [f32; 2] = [52.0, 48.0];
     pub(crate) const SIDEBAR_DEFAULT: f32 = 252.0;

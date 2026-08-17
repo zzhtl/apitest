@@ -2,9 +2,11 @@ use apitest_core::ProtocolKind;
 use eframe::egui::{self, Color32, CornerRadius, RichText, Stroke};
 
 use crate::app::{ApiTestApp, THEME_SETTING};
+use crate::draft::BodyMode;
 use crate::i18n::Language;
 use crate::services::loader::active_environment_setting;
-use crate::state::action::{InteropAction, PendingAction};
+use crate::services::tree::TreeAction;
+use crate::state::action::{InteropAction, PendingAction, ToastKind};
 use crate::state::workspace::Navigation;
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, ThemeMode, UiExt};
@@ -14,30 +16,123 @@ use crate::ui::widgets::{icon_button, rail_button};
 pub(crate) const SEARCH_FIELD_ID: &str = "global_api_search";
 
 impl ApiTestApp {
+    /// The shortcut table, also rendered in the settings window.
+    pub(crate) const SHORTCUTS: &'static [(&'static str, &'static str, &'static str)] = &[
+        ("Ctrl Enter", "发送请求", "Send request"),
+        ("F5", "重新发送", "Resend"),
+        ("Ctrl S", "保存", "Save"),
+        ("Ctrl N", "新建请求", "New request"),
+        ("Ctrl D", "复制当前请求", "Duplicate request"),
+        ("Ctrl W", "关闭当前标签", "Close tab"),
+        ("Ctrl Tab", "下一个标签", "Next tab"),
+        ("Ctrl Shift Tab", "上一个标签", "Previous tab"),
+        ("Ctrl Shift F", "格式化 JSON 请求体", "Format the JSON body"),
+        ("Ctrl K", "命令面板", "Command palette"),
+        ("Esc", "关闭弹层", "Dismiss overlays"),
+    ];
+
     pub(crate) fn keyboard_shortcuts(&mut self, context: &egui::Context) {
         if self.confirmation.is_some() {
             return;
         }
-        let (send, save, new_request, search) = context.input(|input| {
-            (
-                input.modifiers.command && input.key_pressed(egui::Key::Enter),
-                input.modifiers.command && input.key_pressed(egui::Key::S),
-                input.modifiers.command && input.key_pressed(egui::Key::N),
-                input.modifiers.command && input.key_pressed(egui::Key::K),
-            )
+        // The palette owns the keyboard while it is open.
+        if self.show_palette || self.rename_target.is_some() {
+            return;
+        }
+        let keys = context.input(|input| {
+            let command = input.modifiers.command;
+            let shift = input.modifiers.shift;
+            Keys {
+                send: command && input.key_pressed(egui::Key::Enter),
+                resend: input.key_pressed(egui::Key::F5),
+                save: command && input.key_pressed(egui::Key::S),
+                new_request: command && !shift && input.key_pressed(egui::Key::N),
+                duplicate: command && input.key_pressed(egui::Key::D),
+                close_tab: command && input.key_pressed(egui::Key::W),
+                next_tab: command && !shift && input.key_pressed(egui::Key::Tab),
+                previous_tab: command && shift && input.key_pressed(egui::Key::Tab),
+                format: command && shift && input.key_pressed(egui::Key::F),
+                palette: command && input.key_pressed(egui::Key::K),
+                escape: input.key_pressed(egui::Key::Escape),
+            }
         });
-        if search {
+        if keys.palette {
             self.show_palette = true;
             self.palette_query.clear();
+            return;
         }
-        if send && self.navigation == Navigation::Api {
+        if keys.escape {
+            self.show_settings = false;
+            self.show_snippet = false;
+            self.show_curl_import = false;
+            self.show_openapi_preview = false;
+        }
+        if (keys.send || keys.resend) && self.navigation == Navigation::Api {
             self.send_current(context);
         }
-        if save {
+        if keys.save {
             self.save_current();
         }
-        if new_request {
+        if keys.new_request {
             self.queue_action(PendingAction::NewRequest(ProtocolKind::Http));
+        }
+        if keys.duplicate
+            && let Some(document) = self.active_api_document()
+        {
+            self.apply_tree_action(TreeAction::Duplicate {
+                entity_id: document.entity_id,
+            });
+        }
+        if keys.close_tab
+            && let Some(active) = self.document_tabs.active()
+        {
+            self.queue_action(PendingAction::CloseDocument(active));
+        }
+        if keys.next_tab || keys.previous_tab {
+            self.cycle_document(keys.next_tab);
+        }
+        if keys.format {
+            self.format_current_body();
+        }
+    }
+
+    /// Move to the neighbouring tab, wrapping at either end.
+    fn cycle_document(&mut self, forward: bool) {
+        let tabs = self.document_tabs.items().to_vec();
+        if tabs.len() < 2 {
+            return;
+        }
+        let current = self
+            .document_tabs
+            .active()
+            .and_then(|active| tabs.iter().position(|tab| tab.id == active))
+            .unwrap_or_default();
+        let next = if forward {
+            (current + 1) % tabs.len()
+        } else {
+            (current + tabs.len() - 1) % tabs.len()
+        };
+        self.activate_document(tabs[next].id);
+    }
+
+    fn format_current_body(&mut self) {
+        let Some(request) = self.requests.get_mut(self.selected) else {
+            return;
+        };
+        if request.draft.body_mode != BodyMode::Json {
+            return;
+        }
+        match serde_json::from_str::<serde_json::Value>(&request.draft.body)
+            .and_then(|value| serde_json::to_string_pretty(&value))
+        {
+            Ok(pretty) => request.draft.body = pretty,
+            Err(error) => self.toast(
+                ToastKind::Error,
+                match self.language {
+                    Language::Chinese => format!("JSON 格式错误：{error}"),
+                    Language::English => format!("Invalid JSON: {error}"),
+                },
+            ),
         }
     }
 
@@ -346,15 +441,24 @@ impl ApiTestApp {
                                                 } else {
                                                     tab.title.clone()
                                                 };
-                                                if ui
-                                                    .add(
-                                                        egui::Button::new(title)
-                                                            .frame(false)
-                                                            .selected(selected),
-                                                    )
-                                                    .clicked()
-                                                {
+                                                let title_button = ui.add(
+                                                    egui::Button::new(title)
+                                                        .frame(false)
+                                                        .selected(selected)
+                                                        .sense(
+                                                            egui::Sense::click()
+                                                                .union(egui::Sense::hover()),
+                                                        ),
+                                                );
+                                                if title_button.clicked() {
                                                     activate = Some(tab.id);
+                                                }
+                                                // Middle-click closes the tab,
+                                                // as in a browser.
+                                                if title_button
+                                                    .clicked_by(egui::PointerButton::Middle)
+                                                {
+                                                    close = Some(tab.id);
                                                 }
                                                 if ui
                                                     .add_sized(
@@ -385,4 +489,19 @@ impl ApiTestApp {
             self.queue_action(PendingAction::CloseDocument(id));
         }
     }
+}
+
+/// The shortcut chords pressed this frame.
+struct Keys {
+    send: bool,
+    resend: bool,
+    save: bool,
+    new_request: bool,
+    duplicate: bool,
+    close_tab: bool,
+    next_tab: bool,
+    previous_tab: bool,
+    format: bool,
+    palette: bool,
+    escape: bool,
 }
