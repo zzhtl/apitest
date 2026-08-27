@@ -5,9 +5,10 @@ ApiTest 是一个使用 Rust 与 egui 构建的本地优先 API 桌面工具。�
 ## 当前能力
 
 - 紧凑的深色/浅色桌面工作台，支持简体中文与英文，并持久化外观设置。
-- HTTP 请求编辑、参数、请求头、完整请求体、环境变量、发送/取消和流式响应查看。
-- Basic、Bearer、API Key、OAuth2、Digest、AWS SigV4 认证；敏感值通过系统钥匙串引用，不写入项目文档。
-- GraphQL 与 SSE 复用 HTTP 流式执行管线。
+- HTTP 请求编辑、参数、请求头、完整请求体、环境变量、发送/取消和流式响应查看，大响应体虚拟化渲染。
+- Basic、Bearer、API Key、OAuth2（token 缓存与自动刷新）、Digest、AWS SigV4 认证；敏感值通过系统钥匙串引用，不写入项目文档。
+- GraphQL 与 SSE 复用 HTTP 流式执行管线；SSE 支持空闲超时与断线重连（携带 Last-Event-ID）。
+- Cookie 管理：响应 Set-Cookie 自动入 jar、后续请求自动携带、持久 Cookie 跨重启保存、独立管理面板。
 - WebSocket 双向会话、消息时间线与主动关闭。
 - gRPC proto/descriptor/reflection 动态发现，支持 unary、服务端流、客户端流和双向流。
 - 每个请求可配置断言、变量提取器、前置/后置脚本；单次发送与场景执行共用同一套判定逻辑。
@@ -15,10 +16,11 @@ ApiTest 是一个使用 Rust 与 egui 构建的本地优先 API 桌面工具。�
 - 请求体与响应体 JSON/XML 语法高亮，`{{变量}}` 按是否可解析着色；响应支持查找、换行、树形浏览和保存到文件。
 - 资源树支持文件夹、重命名、拖拽移动、复制与删除；FTS5 全文搜索覆盖未加载到内存的接口。
 - 命令面板（Ctrl K）聚合跳转与常用动作。
-- SQLite WAL 持久化、FTS5 搜索、外置大响应体和滚动备份。
-- QuickJS 沙箱脚本、响应断言、场景串行执行和变量传递。
+- SQLite WAL 持久化、FTS5 搜索、外置大响应体和滚动备份（启动及每 30 分钟自动快照，保留 5 份）。
+- 运行历史本地留存，保留条数与天数可在设置中调整。
+- QuickJS 沙箱脚本（常驻脚本线程）、响应断言、场景串行执行和变量传递。
 - 本地 Mock 服务、OpenAPI 导入导出与静态文档、Postman/HAR/cURL 互操作。
-- cURL、JavaScript fetch、Python requests、Rust reqwest 代码片段生成。
+- HTTP 生成 cURL、JavaScript fetch、Python requests、Rust reqwest 片段；WebSocket 生成 websocat/浏览器 JS，gRPC 生成 grpcurl。
 
 ## 安装
 
