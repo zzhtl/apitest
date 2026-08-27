@@ -5,6 +5,7 @@ use crate::app::ApiTestApp;
 use crate::i18n::Language;
 use crate::theme::UiExt;
 use crate::theme::tokens::pad;
+use crate::ui::text_view::virtual_text_view;
 use crate::ui::widgets::{Tone, badge, empty_state, format_bytes};
 
 impl ApiTestApp {
@@ -82,17 +83,15 @@ impl ApiTestApp {
                 if record.body_path.is_none() {
                     empty_state(ui, self.tr("没有响应正文", "No response body"), "");
                 } else {
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&self.history_body_preview)
-                                    .monospace()
-                                    .color(palette.text),
-                            )
-                            .selectable(true)
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                        );
-                    });
+                    // Row-virtualized: a 10 MiB preview as one Label froze
+                    // the whole frame.
+                    virtual_text_view(
+                        ui,
+                        &self.history_body_preview,
+                        &self.history_preview_rows,
+                        &[],
+                        palette.primary_soft,
+                    );
                     if self.history_body_truncated {
                         ui.colored_label(
                             palette.warning,

@@ -9,5 +9,6 @@ pub(crate) mod scenario;
 pub(crate) mod shell;
 pub(crate) mod sidebar;
 pub(crate) mod status_bar;
+pub(crate) mod text_view;
 pub(crate) mod widgets;
 pub(crate) mod windows;

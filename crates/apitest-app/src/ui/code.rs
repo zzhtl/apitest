@@ -142,57 +142,57 @@ pub(crate) fn code_editor(
 /// The read-only counterpart, used for response bodies.
 ///
 /// A `TextEdit` rather than a `Label` so the text stays selectable and shares
-/// the highlighting path; `search` marks matches on top.
+/// the highlighting path. The caller owns `buffer` (refreshed only when the
+/// body changes, not per frame) and precomputes the search `matches`.
 pub(crate) fn code_view(
     ui: &mut egui::Ui,
-    text: &str,
+    buffer: &mut String,
     syntax: &str,
-    search: &str,
+    matches: &[std::ops::Range<usize>],
     wrap: bool,
 ) -> egui::Response {
     let highlight_color = ui.palette().primary_soft;
-    let mut buffer = text.to_owned();
     let mut layouter = |ui: &egui::Ui, source: &dyn egui::TextBuffer, wrap_width: f32| {
         let theme = CodeTheme::from_style(ui.style());
         let mut job = highlight(ui.ctx(), ui.style(), &theme, source.as_str(), syntax);
-        highlight_matches(&mut job, search, highlight_color);
+        apply_match_ranges(&mut job, matches, highlight_color);
         job.wrap.max_width = if wrap { wrap_width } else { f32::INFINITY };
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
     ui.add_sized(
         ui.available_size(),
-        egui::TextEdit::multiline(&mut buffer)
+        egui::TextEdit::multiline(buffer)
             .code_editor()
             .desired_width(f32::INFINITY)
             .layouter(&mut layouter),
     )
 }
 
-/// Highlight every occurrence of `needle`, returning how many were found.
-pub(crate) fn highlight_matches(
+/// Paint a background behind every section that falls inside a match span.
+///
+/// Both lists are ordered by byte position (`matches` never overlap), so one
+/// merge pass suffices; this runs inside the layouter, i.e. per frame.
+fn apply_match_ranges(
     job: &mut LayoutJob,
-    needle: &str,
+    matches: &[std::ops::Range<usize>],
     highlight_color: Color32,
-) -> usize {
-    if needle.is_empty() {
-        return 0;
+) {
+    if matches.is_empty() {
+        return;
     }
-    let lowered = job.text.to_lowercase();
-    let needle = needle.to_lowercase();
-    let mut count = 0;
-    let mut index = 0;
-    while let Some(found) = lowered[index..].find(&needle) {
-        let start = index + found;
-        let end = start + needle.len();
-        for section in &mut job.sections {
-            if section.byte_range.start.0 >= start && section.byte_range.end.0 <= end {
-                section.format.background = highlight_color;
-            }
+    let mut next = 0;
+    for section in &mut job.sections {
+        let (start, end) = (section.byte_range.start.0, section.byte_range.end.0);
+        while next < matches.len() && matches[next].end <= start {
+            next += 1;
         }
-        count += 1;
-        index = end;
+        let Some(span) = matches.get(next) else {
+            break;
+        };
+        if span.start <= start && end <= span.end {
+            section.format.background = highlight_color;
+        }
     }
-    count
 }
 
 #[cfg(test)]

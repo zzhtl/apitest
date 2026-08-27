@@ -224,6 +224,7 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         selected_history: 0,
         history_body_preview: String::new(),
         history_body_truncated: false,
+        history_preview_rows: Vec::new(),
         storage_worker: Some(storage_worker),
         projects: vec![project.clone()],
         project,
@@ -272,5 +273,6 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         allow_close: false,
         last_edit_sweep: None,
         search_cache: Default::default(),
+        snippet_cache: None,
     }
 }

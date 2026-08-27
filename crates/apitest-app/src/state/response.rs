@@ -64,6 +64,9 @@ pub(crate) struct ResponseView {
     pub(crate) saw_first_byte: bool,
     /// Total bytes received so far, past the preview cap, for live progress.
     pub(crate) streamed_bytes: u64,
+    /// Bumped whenever `body`/`pretty_body` change, so render caches can key
+    /// off `(run, revision)` instead of hashing the whole text every frame.
+    pub(crate) revision: u64,
 }
 
 impl Default for ResponseView {
@@ -84,6 +87,7 @@ impl Default for ResponseView {
             timeline: Vec::new(),
             saw_first_byte: false,
             streamed_bytes: 0,
+            revision: 0,
         }
     }
 }
@@ -136,6 +140,7 @@ impl ResponseView {
         self.preview_bytes += accepted;
         self.truncated |= accepted < bytes.len();
 
+        self.revision = self.revision.wrapping_add(1);
         let mut data = std::mem::take(&mut self.pending_utf8);
         data.extend_from_slice(&bytes[..accepted]);
         let mut cursor = 0;
@@ -163,6 +168,7 @@ impl ResponseView {
     }
 
     pub(crate) fn finish_body(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
         if !self.pending_utf8.is_empty() {
             self.body.push('\u{fffd}');
             self.pending_utf8.clear();

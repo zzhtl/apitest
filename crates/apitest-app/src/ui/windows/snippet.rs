@@ -2,7 +2,7 @@ use apitest_core::ProtocolSpec;
 use apitest_interop::{CodeLanguage, generate_code};
 use eframe::egui::{self, RichText};
 
-use crate::app::ApiTestApp;
+use crate::app::{ApiTestApp, SnippetCache};
 use crate::state::action::ToastKind;
 use crate::theme::UiExt;
 use crate::ui::widgets::icon_button;
@@ -46,7 +46,33 @@ impl ApiTestApp {
 
     pub(crate) fn snippet_window(&mut self, context: &egui::Context) {
         let mut open = self.show_snippet;
-        let source = self.snippet_source();
+        // Regenerate only when the request, language or edit revision moved;
+        // the revision advances via the edit sweep, at most every 250 ms.
+        let key = self.requests.get(self.selected).map(|request| {
+            (
+                request.id(),
+                self.snippet_language,
+                request.autosave.current_revision(),
+            )
+        });
+        let cached = key.is_some_and(|(request, language, revision)| {
+            self.snippet_cache.as_ref().is_some_and(|cache| {
+                cache.request == request && cache.language == language && cache.revision == revision
+            })
+        });
+        if !cached {
+            let source = self.snippet_source();
+            self.snippet_cache = key.map(|(request, language, revision)| SnippetCache {
+                request,
+                language,
+                revision,
+                source,
+            });
+        }
+        let source = match &self.snippet_cache {
+            Some(cache) if key.is_some() => cache.source.clone(),
+            _ => self.snippet_source(),
+        };
         let mut copy = None;
         let mut export = None;
         let mut selected = self.snippet_language;

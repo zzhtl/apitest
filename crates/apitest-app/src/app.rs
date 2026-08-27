@@ -55,6 +55,9 @@ pub struct ApiTestApp {
     pub(crate) selected_history: usize,
     pub(crate) history_body_preview: String,
     pub(crate) history_body_truncated: bool,
+    /// Display rows of `history_body_preview` for the virtualized viewer,
+    /// rebuilt whenever the preview is loaded.
+    pub(crate) history_preview_rows: Vec<std::ops::Range<usize>>,
     pub(crate) storage_worker: Option<StorageWorker>,
     pub(crate) projects: Vec<Project>,
     pub(crate) project: Project,
@@ -108,6 +111,17 @@ pub struct ApiTestApp {
     pub(crate) last_edit_sweep: Option<Instant>,
     /// Cached sidebar/palette search results; see `cached_search_hits`.
     pub(crate) search_cache: SearchCache,
+    /// Cached snippet output keyed by request, language and edit revision.
+    pub(crate) snippet_cache: Option<SnippetCache>,
+}
+
+/// See `ApiTestApp::snippet_window`: regenerating the snippet every frame the
+/// window stays open re-cloned the whole protocol per frame.
+pub(crate) struct SnippetCache {
+    pub(crate) request: EntityId,
+    pub(crate) language: CodeLanguage,
+    pub(crate) revision: u64,
+    pub(crate) source: Result<String, String>,
 }
 
 impl ApiTestApp {
@@ -272,6 +286,7 @@ impl ApiTestApp {
             selected_history: 0,
             history_body_preview: String::new(),
             history_body_truncated: false,
+            history_preview_rows: Vec::new(),
             storage_worker,
             projects,
             project,
@@ -325,6 +340,7 @@ impl ApiTestApp {
             allow_close: false,
             last_edit_sweep: None,
             search_cache: SearchCache::default(),
+            snippet_cache: None,
         }
     }
 }

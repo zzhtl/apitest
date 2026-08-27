@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use apitest_core::{ExecutionCommand, RunRecord};
 use apitest_storage::RedactingBodySink;
@@ -36,6 +37,8 @@ pub(crate) struct DocumentSession {
     /// Response viewer state: search box contents and soft-wrap preference.
     pub(crate) body_search: String,
     pub(crate) body_wrap: bool,
+    /// Derived render state for the response body; see `BodyRenderCache`.
+    pub(crate) render_cache: BodyRenderCache,
 }
 
 impl DocumentSession {
@@ -46,6 +49,29 @@ impl DocumentSession {
         }
         self.execution_commands = None;
     }
+}
+
+/// Everything derived from the response body that used to be recomputed per
+/// frame: the match scan, the JSON tree parse, the display rows for the
+/// virtualized viewer and the owned buffer `TextEdit` needs.
+///
+/// `(run, revision)` identifies the content ((`run` is unique per send, so a
+/// fresh response restarting at revision 0 can never collide with the last
+/// one); `mode` selects raw vs pretty text and `search` the match set.
+#[derive(Default)]
+pub(crate) struct BodyRenderCache {
+    pub(crate) run: u64,
+    pub(crate) revision: u64,
+    pub(crate) mode: ResponseBodyMode,
+    pub(crate) search: String,
+    /// Case-insensitive match spans of `search`, sorted by start.
+    pub(crate) matches: Vec<Range<usize>>,
+    /// Display rows for the virtualized large-body viewer.
+    pub(crate) rows: Vec<Range<usize>>,
+    /// Owned copy of the body for the small-body `TextEdit` path.
+    pub(crate) edit_buffer: String,
+    /// Parsed JSON document for the tree view, when the body parses.
+    pub(crate) tree: Option<serde_json::Value>,
 }
 
 #[derive(Default)]

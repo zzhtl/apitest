@@ -10,6 +10,7 @@ use crate::theme::tokens::radius;
 use crate::theme::{self, UiExt};
 use crate::ui::code::code_view;
 use crate::ui::json_tree::json_tree;
+use crate::ui::text_view::{match_ranges, split_display_rows, virtual_text_view};
 use crate::ui::widgets::{Tone, badge, empty_state, format_bytes, icon_button, tab_button};
 
 /// Fixed id of the find-in-response field so Ctrl+F can focus it.
@@ -192,21 +193,16 @@ impl ApiTestApp {
             );
             return;
         }
+        refresh_body_render_cache(self.session_mut());
         let mut mode = self.session().response_body_mode;
         let mut wrap = self.session().body_wrap;
         let mut search = self.session().body_search.clone();
-        let body = {
-            let response = &self.session().response;
-            response
-                .pretty_body
-                .as_ref()
-                .filter(|_| mode != ResponseBodyMode::Raw)
-                .unwrap_or(&response.body)
-                .clone()
-        };
         let looks_like_json = self.session().response.pretty_body.is_some();
+        // From the cache, so no scan runs here; a search edit shows its new
+        // count on the next frame, when the cache has caught up.
+        let matches = self.session().render_cache.matches.len();
         let mut save = false;
-        let mut matches = 0;
+        let mut copy = false;
         ui.horizontal(|ui| {
             ui.selectable_value(&mut mode, ResponseBodyMode::Pretty, "Pretty");
             ui.selectable_value(&mut mode, ResponseBodyMode::Raw, "Raw");
@@ -221,7 +217,6 @@ impl ApiTestApp {
                     .hint_text(self.tr("在响应中查找", "Find in response")),
             );
             if !search.is_empty() {
-                matches = body.to_lowercase().matches(&search.to_lowercase()).count();
                 ui.label(
                     RichText::new(match self.language {
                         Language::Chinese => format!("{matches} 处"),
@@ -237,7 +232,7 @@ impl ApiTestApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(ui, "copy", self.tr("复制响应", "Copy response")).clicked() {
-                    ui.ctx().copy_text(body.clone());
+                    copy = true;
                 }
                 if icon_button(ui, "download", self.tr("保存到文件", "Save to file")).clicked()
                 {
@@ -251,23 +246,51 @@ impl ApiTestApp {
             session.response_body_mode = mode;
             session.body_wrap = wrap;
             session.body_search = search.clone();
+            // Pick up this frame's mode/search edits right away.
+            refresh_body_render_cache(session);
         }
         let syntax = if looks_like_json && mode != ResponseBodyMode::Raw {
             "json"
         } else {
             "txt"
         };
-        if mode == ResponseBodyMode::Tree
-            && let Ok(document) = serde_json::from_str::<serde_json::Value>(&body)
-        {
-            json_tree(ui, &document, &search);
+        if mode == ResponseBodyMode::Tree && self.session().render_cache.tree.is_some() {
+            let session = self.session();
+            if let Some(document) = &session.render_cache.tree {
+                json_tree(ui, document, &search);
+            }
         } else {
-            egui::ScrollArea::both().show(ui, |ui| {
-                code_view(ui, &body, syntax, &search, wrap);
-            });
+            let session = self.session_mut();
+            let body_len = displayed_body(&session.response, mode).len();
+            if body_len >= VIRTUAL_VIEW_THRESHOLD {
+                // Too big to lay out in full: virtualized read-only rows.
+                let body = displayed_body(&session.response, mode);
+                virtual_text_view(
+                    ui,
+                    body,
+                    &session.render_cache.rows,
+                    &session.render_cache.matches,
+                    palette.primary_soft,
+                );
+            } else {
+                let crate::state::session::BodyRenderCache {
+                    edit_buffer,
+                    matches,
+                    ..
+                } = &mut session.render_cache;
+                egui::ScrollArea::both().show(ui, |ui| {
+                    code_view(ui, edit_buffer, syntax, matches, wrap);
+                });
+            }
         }
-        if save {
-            self.export_text("response.txt", "Text", &body);
+        if copy || save {
+            let body = displayed_body(&self.session().response, mode).to_owned();
+            if copy {
+                ui.ctx().copy_text(body.clone());
+            }
+            if save {
+                self.export_text("response.txt", "Text", &body);
+            }
         }
         if self.session().response.truncated {
             ui.colored_label(
@@ -279,6 +302,67 @@ impl ApiTestApp {
             );
         }
     }
+}
+
+/// Bodies at or above this size switch from the selectable `TextEdit` to the
+/// row-virtualized viewer; laying out megabytes of highlighted text every
+/// frame is what made large responses unusable.
+const VIRTUAL_VIEW_THRESHOLD: usize = 256 * 1024;
+
+/// The text the body view shows for `mode`.
+fn displayed_body(response: &crate::state::response::ResponseView, mode: ResponseBodyMode) -> &str {
+    response
+        .pretty_body
+        .as_deref()
+        .filter(|_| mode != ResponseBodyMode::Raw)
+        .unwrap_or(&response.body)
+}
+
+/// Rebuild the derived render state when the body, view mode or search text
+/// changed; a no-op on every other frame.
+fn refresh_body_render_cache(session: &mut crate::state::session::DocumentSession) {
+    let mode = session.response_body_mode;
+    let content_changed = session.render_cache.run != session.run
+        || session.render_cache.revision != session.response.revision
+        || session.render_cache.mode != mode;
+    let search_changed = session.render_cache.search != session.body_search;
+    if !content_changed && !search_changed {
+        return;
+    }
+    let crate::state::session::DocumentSession {
+        response,
+        render_cache,
+        body_search,
+        run,
+        ..
+    } = session;
+    let body = displayed_body(response, mode);
+    let streaming = response.is_active();
+    if content_changed {
+        render_cache.rows = split_display_rows(body);
+        if body.len() < VIRTUAL_VIEW_THRESHOLD {
+            render_cache.edit_buffer.clear();
+            render_cache.edit_buffer.push_str(body);
+        } else {
+            render_cache.edit_buffer = String::new();
+        }
+        // Parsing megabytes per streamed chunk would stall the UI; the finish
+        // event bumps the revision once more and fills the tree in.
+        render_cache.tree = if streaming || mode != ResponseBodyMode::Tree {
+            None
+        } else {
+            serde_json::from_str(body).ok()
+        };
+    }
+    // Same guard for the match scan: while streaming, stale spans only ever
+    // cover the prefix that existed when they were computed, which is safe.
+    if search_changed || (content_changed && !streaming) {
+        render_cache.matches = match_ranges(body, body_search);
+    }
+    render_cache.run = *run;
+    render_cache.revision = response.revision;
+    render_cache.mode = mode;
+    render_cache.search = body_search.clone();
 }
 
 pub(crate) fn response_headers(

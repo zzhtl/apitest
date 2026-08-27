@@ -10,6 +10,7 @@ use crate::i18n::Language;
 use crate::services::secrets::sensitive_name;
 use crate::state::action::ToastKind;
 use crate::state::response::MAX_RESPONSE_BYTES;
+use crate::ui::text_view::split_display_rows;
 use crate::workbench::DocumentId;
 
 pub(crate) const HISTORY_MAX_RECORDS: usize = 200;
@@ -211,6 +212,7 @@ impl ApiTestApp {
         let Some(database) = self.database.clone() else {
             self.run_records.clear();
             self.history_body_preview.clear();
+            self.history_preview_rows.clear();
             self.history_body_truncated = false;
             return;
         };
@@ -239,6 +241,11 @@ impl ApiTestApp {
     }
 
     pub(crate) fn load_selected_history_body(&mut self) {
+        self.fill_history_preview();
+        self.history_preview_rows = split_display_rows(&self.history_body_preview);
+    }
+
+    fn fill_history_preview(&mut self) {
         self.history_body_preview.clear();
         self.history_body_truncated = false;
         let Some(path) = self

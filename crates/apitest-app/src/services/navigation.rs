@@ -364,6 +364,7 @@ impl ApiTestApp {
         self.run_records = run_records;
         self.selected_history = 0;
         self.history_body_preview.clear();
+        self.history_preview_rows.clear();
         self.history_body_truncated = false;
         self.mock_server = None;
         self.mock_run_id = self.mock_run_id.wrapping_add(1);
