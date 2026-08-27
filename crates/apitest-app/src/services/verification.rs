@@ -176,7 +176,15 @@ impl ApiTestApp {
         let sender = self.sender.clone();
         let context = context.clone();
         self.runtime.spawn(async move {
-            let outcome = evaluate(job);
+            // Assertions block on the script worker and may compile a JSON
+            // schema; neither belongs on the 2-thread async runtime.
+            let outcome = match tokio::task::spawn_blocking(move || evaluate(job)).await {
+                Ok(outcome) => outcome,
+                Err(join_error) => {
+                    tracing::error!(%join_error, "verification task failed");
+                    return;
+                }
+            };
             let _ = sender.send(RuntimeMessage::Verified(run, Box::new(outcome)));
             context.request_repaint();
         });

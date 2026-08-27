@@ -1,7 +1,8 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
-    time::{Duration, Instant},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime},
 };
 
 use apitest_core::{
@@ -133,11 +134,87 @@ impl GrpcMethod {
 #[derive(Clone)]
 pub struct GrpcExecutor {
     secrets: Arc<dyn SecretStore>,
+    /// Dialed channels by (endpoint, timeout). tonic reconnects a broken
+    /// channel lazily on the next call, so cached entries survive restarts of
+    /// the server behind them.
+    channels: Arc<Mutex<HashMap<(String, u64), Channel>>>,
+    /// Compiled descriptors keyed by their source files; recompiling protos
+    /// on every call cost more than the call itself.
+    descriptors: Arc<Mutex<HashMap<DescriptorKey, GrpcDescriptor>>>,
+}
+
+/// Identity of a descriptor source on disk.
+///
+/// Proto imports resolved through `import_paths` are not tracked; touching
+/// the listed proto file refreshes the cache entry.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum DescriptorKey {
+    DescriptorSet(PathBuf, Option<SystemTime>, u64),
+    ProtoFiles(Vec<PathBuf>, Vec<PathBuf>, Option<SystemTime>),
 }
 
 impl GrpcExecutor {
     pub fn new(secrets: Arc<dyn SecretStore>) -> Self {
-        Self { secrets }
+        Self {
+            secrets,
+            channels: Arc::new(Mutex::new(HashMap::new())),
+            descriptors: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    async fn channel_for(
+        &self,
+        spec: &GrpcSpec,
+        cancellation: &CancellationToken,
+    ) -> Result<Channel, ExecutionError> {
+        let key = (spec.endpoint.clone(), spec.timeout_ms);
+        if let Some(channel) = self
+            .channels
+            .lock()
+            .expect("gRPC channel cache should not be poisoned")
+            .get(&key)
+        {
+            return Ok(channel.clone());
+        }
+        let channel = connect(spec, cancellation).await?;
+        let mut channels = self
+            .channels
+            .lock()
+            .expect("gRPC channel cache should not be poisoned");
+        if channels.len() >= 8 {
+            channels.clear();
+        }
+        channels.insert(key, channel.clone());
+        Ok(channel)
+    }
+
+    async fn descriptor_for(
+        &self,
+        spec: &GrpcSpec,
+        channel: Channel,
+    ) -> Result<GrpcDescriptor, ExecutionError> {
+        let key = descriptor_key(spec).await?;
+        if let Some(key) = &key
+            && let Some(descriptor) = self
+                .descriptors
+                .lock()
+                .expect("gRPC descriptor cache should not be poisoned")
+                .get(key)
+        {
+            return Ok(descriptor.clone());
+        }
+        let descriptor = load_descriptor(spec, channel).await?;
+        if let Some(key) = key {
+            let mut descriptors = self
+                .descriptors
+                .lock()
+                .expect("gRPC descriptor cache should not be poisoned");
+            if descriptors.len() >= 16 {
+                descriptors.clear();
+            }
+            descriptors.insert(key, descriptor.clone());
+        }
+        Ok(descriptor)
     }
 
     fn materialize_environment(
@@ -204,8 +281,8 @@ impl ProtocolExecutor for GrpcExecutor {
                 &request.environment,
                 &request.local_variables,
             )?;
-            let channel = connect(&spec, &cancellation).await?;
-            let descriptor = load_descriptor(&spec, channel.clone()).await?;
+            let channel = executor.channel_for(&spec, &cancellation).await?;
+            let descriptor = executor.descriptor_for(&spec, channel.clone()).await?;
             let method = descriptor
                 .method(&spec.service, &spec.method)
                 .map_err(|error| ExecutionError::InvalidRequest(error.to_string()))?;
@@ -324,6 +401,42 @@ async fn connect(
         _ = cancellation.cancelled() => Err(ExecutionError::Cancelled),
         result = endpoint.connect() => result.map_err(|error| ExecutionError::Network(error.to_string())),
     }
+}
+
+/// The cache key for `spec`'s descriptor source, or `None` when reflection
+/// is used (the server stays the source of truth).
+async fn descriptor_key(spec: &GrpcSpec) -> Result<Option<DescriptorKey>, ExecutionError> {
+    if let Some(path) = &spec.descriptor_set {
+        let metadata = tokio::fs::metadata(path).await.map_err(|error| {
+            ExecutionError::InvalidRequest(format!(
+                "failed to read descriptor set `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        return Ok(Some(DescriptorKey::DescriptorSet(
+            path.clone(),
+            metadata.modified().ok(),
+            metadata.len(),
+        )));
+    }
+    if !spec.proto_files.is_empty() {
+        let mut newest = None;
+        for path in &spec.proto_files {
+            let metadata = tokio::fs::metadata(path).await.map_err(|error| {
+                ExecutionError::InvalidRequest(format!(
+                    "failed to read proto file `{}`: {error}",
+                    path.display()
+                ))
+            })?;
+            newest = newest.max(metadata.modified().ok());
+        }
+        return Ok(Some(DescriptorKey::ProtoFiles(
+            spec.proto_files.clone(),
+            spec.import_paths.clone(),
+            newest,
+        )));
+    }
+    Ok(None)
 }
 
 async fn load_descriptor(

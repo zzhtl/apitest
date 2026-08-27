@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use egui::{FontData, FontDefinitions, FontFamily};
 use iconflow::fonts;
+use serde::{Deserialize, Serialize};
 
 /// Simplified-Chinese capable families, most preferred first.
 ///
@@ -74,7 +75,37 @@ impl FontReport {
     }
 }
 
-pub fn install_fonts(ctx: &egui::Context) -> FontReport {
+/// Where a previous startup found the CJK face, so the next one can load that
+/// file directly instead of enumerating every installed font.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontCacheHint {
+    pub path: PathBuf,
+    pub family: String,
+}
+
+pub fn install_fonts_with_hint(
+    ctx: &egui::Context,
+    hint: Option<&FontCacheHint>,
+) -> (FontReport, Option<FontCacheHint>) {
+    // Fast path: the remembered file still exists and still carries the
+    // remembered family. Loading one file re-validates it fully, at a
+    // fraction of the system-wide scan.
+    if let Some(hint) = hint {
+        let mut database = fontdb::Database::new();
+        if database.load_font_file(&hint.path).is_ok()
+            && let Some((bytes, index)) = face_data(&database, &hint.family)
+        {
+            install_definitions(ctx, Some((bytes, index)));
+            return (
+                FontReport {
+                    cjk_family: Some(hint.family.clone()),
+                    scanned_fallback_paths: false,
+                },
+                Some(hint.clone()),
+            );
+        }
+    }
+
     let mut database = fontdb::Database::new();
     database.load_system_fonts();
 
@@ -88,10 +119,33 @@ pub fn install_fonts(ctx: &egui::Context) -> FontReport {
         family = select_family(&family_names(&database));
     }
 
+    let mut face = None;
+    if let Some(name) = family.as_deref() {
+        face = face_data(&database, name);
+        if face.is_none() {
+            family = None;
+        }
+    }
+    let next_hint = family.as_deref().and_then(|name| {
+        face_source(&database, name).map(|path| FontCacheHint {
+            path,
+            family: name.to_owned(),
+        })
+    });
+    install_definitions(ctx, face);
+
+    (
+        FontReport {
+            cjk_family: family,
+            scanned_fallback_paths,
+        },
+        next_hint,
+    )
+}
+
+fn install_definitions(ctx: &egui::Context, face: Option<(Vec<u8>, u32)>) {
     let mut definitions = FontDefinitions::default();
-    if let Some(name) = family.as_deref()
-        && let Some((bytes, index)) = face_data(&database, name)
-    {
+    if let Some((bytes, index)) = face {
         let mut data = FontData::from_owned(bytes);
         data.index = index;
         definitions
@@ -102,8 +156,6 @@ pub fn install_fonts(ctx: &egui::Context) -> FontReport {
                 family_fonts.push("apitest-cjk".into());
             }
         }
-    } else {
-        family = None;
     }
 
     let fallback_fonts = definitions.font_data.keys().cloned().collect::<Vec<_>>();
@@ -125,11 +177,6 @@ pub fn install_fonts(ctx: &egui::Context) -> FontReport {
         );
     }
     ctx.set_fonts(definitions);
-
-    FontReport {
-        cjk_family: family,
-        scanned_fallback_paths,
-    }
 }
 
 fn family_names(database: &fontdb::Database) -> Vec<String> {
@@ -179,6 +226,20 @@ fn face_data(database: &fontdb::Database, family: &str) -> Option<(Vec<u8>, u32)
     database.with_face_data(id, |data, index| (data.to_vec(), index))
 }
 
+/// The on-disk path of the face `family` resolves to, when it has one.
+fn face_source(database: &fontdb::Database, family: &str) -> Option<PathBuf> {
+    let id = database.query(&fontdb::Query {
+        families: &[fontdb::Family::Name(family)],
+        weight: fontdb::Weight::NORMAL,
+        stretch: fontdb::Stretch::Normal,
+        style: fontdb::Style::Normal,
+    })?;
+    match &database.face(id)?.source {
+        fontdb::Source::File(path) => Some(path.clone()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::select_family;
@@ -217,7 +278,7 @@ mod tests {
     #[test]
     fn the_report_agrees_with_what_egui_can_render() {
         let ctx = egui::Context::default();
-        let report = super::install_fonts(&ctx);
+        let (report, _) = super::install_fonts_with_hint(&ctx, None);
         let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         let renders_chinese = ctx.fonts_mut(|fonts| {
             fonts.has_glyphs(&egui::FontId::proportional(13.0), "测试接口")

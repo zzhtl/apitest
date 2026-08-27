@@ -12,7 +12,9 @@ use apitest_runtime::{
     ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, ScenarioReport, ScriptEngine,
     WebSocketExecutor,
 };
-use apitest_storage::{BodyStore, Database, PageRequest, SecretStore, SystemSecretStore};
+use apitest_storage::{
+    BodyStore, CachingSecretStore, Database, PageRequest, SecretStore, SystemSecretStore,
+};
 use eframe::egui::{self, Stroke};
 use tokio_util::sync::CancellationToken;
 
@@ -43,6 +45,8 @@ pub(crate) const ACTIVE_ENVIRONMENT_SETTING: &str = "ui.active_environment";
 pub(crate) const ACTIVE_PROJECT_SETTING: &str = "ui.active_project";
 
 pub(crate) const DOCUMENT_TABS_SETTING: &str = "ui.document_tabs";
+
+pub(crate) const FONT_CACHE_SETTING: &str = "ui.cjk_font_cache";
 
 pub struct ApiTestApp {
     pub(crate) runtime: Arc<tokio::runtime::Runtime>,
@@ -147,7 +151,19 @@ impl ApiTestApp {
             });
         let theme = load_setting(database.as_deref(), THEME_SETTING, ThemeMode::Dark);
         let language = load_setting(database.as_deref(), LANGUAGE_SETTING, Language::Chinese);
-        let font_report = theme::install_fonts(&context.egui_ctx);
+        // Remember which file carried the CJK face so the next startup loads
+        // it directly instead of scanning every installed font.
+        let font_hint: Option<theme::FontCacheHint> = database
+            .as_deref()
+            .and_then(|database| database.get_setting(FONT_CACHE_SETTING).ok().flatten());
+        let (font_report, next_font_hint) =
+            theme::install_fonts_with_hint(&context.egui_ctx, font_hint.as_ref());
+        if next_font_hint != font_hint
+            && let Some(database) = database.as_deref()
+            && let Err(error) = database.set_setting(FONT_CACHE_SETTING, &next_font_hint)
+        {
+            tracing::warn!(%error, "failed to persist the font cache hint");
+        }
         if font_report.is_missing() {
             startup_errors.push(
                 i18n::tr(
@@ -173,7 +189,12 @@ impl ApiTestApp {
                 .build()
                 .expect("ApiTest async runtime should initialize"),
         );
-        let secrets: Arc<dyn SecretStore> = Arc::new(SystemSecretStore::new("ApiTest"));
+        // 30 s read-through cache: every send resolves each referenced secret,
+        // and on Linux each uncached read is a D-Bus round-trip.
+        let secrets: Arc<dyn SecretStore> = Arc::new(CachingSecretStore::new(
+            SystemSecretStore::new("ApiTest"),
+            std::time::Duration::from_secs(30),
+        ));
         let http: Arc<dyn ProtocolExecutor> = Arc::new(HttpExecutor::new(Arc::clone(&secrets)));
         let websocket: Arc<dyn ProtocolExecutor> =
             Arc::new(WebSocketExecutor::new(Arc::clone(&secrets)));

@@ -10,4 +10,4 @@ pub use backup::BackupManager;
 pub use body_store::{BodyRef, BodySink, BodyStore, RedactingBodySink};
 pub use database::{Database, DefinitionSummary, Page, PageRequest};
 pub use error::StorageError;
-pub use secret::{MemorySecretStore, SecretStore, SystemSecretStore};
+pub use secret::{CachingSecretStore, MemorySecretStore, SecretStore, SystemSecretStore};

@@ -8,7 +8,7 @@ use egui::{
 use iconflow::{Pack, Size, Style, try_icon};
 use serde::{Deserialize, Serialize};
 
-pub use fonts::install_fonts;
+pub use fonts::{FontCacheHint, install_fonts_with_hint};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -149,6 +149,9 @@ impl ApiTestApp {
                 )
             })
             .collect::<HashMap<_, _>>();
+        // Shared read-only: data-driven runs iterate without re-cloning every
+        // case (each embeds a full request body).
+        let cases = std::sync::Arc::new(cases);
         let mut runner = ScenarioRunner::new();
         for kind in [
             ProtocolKind::Http,
@@ -183,7 +186,7 @@ impl ApiTestApp {
                 match runner
                     .run_test_scenario(
                         scenario.clone(),
-                        cases.clone(),
+                        std::sync::Arc::clone(&cases),
                         variables,
                         cancellation.child_token(),
                     )

@@ -162,7 +162,7 @@ impl ProtocolExecutor for FakeExecutor {
 }
 
 pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp {
-    theme::install_fonts(&context.egui_ctx);
+    theme::install_fonts_with_hint(&context.egui_ctx, None);
     theme::apply(&context.egui_ctx, ThemeMode::Dark);
     let runtime = Arc::new(
         tokio::runtime::Builder::new_multi_thread()

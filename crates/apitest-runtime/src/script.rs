@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::{OnceLock, mpsc},
+    time::{Duration, Instant},
+};
 
 use rquickjs::{Context, Runtime};
 use serde::{Deserialize, Serialize};
@@ -34,6 +38,99 @@ pub enum ScriptError {
     InvalidResult(String),
     #[error("script exceeded the {timeout_ms} ms execution limit")]
     Timeout { timeout_ms: u64 },
+    #[error("the script worker is unavailable")]
+    WorkerUnavailable,
+}
+
+/// Source text plus the `(global name, JSON payload)` pairs it reads.
+type ScriptPayload = (String, Vec<(&'static str, String)>);
+
+/// One evaluation request for the dedicated script thread.
+struct ScriptJob {
+    source: String,
+    /// `(global name, JSON payload)` pairs installed before evaluation, so
+    /// megabytes of response body never get inlined into the source text and
+    /// re-parsed as JavaScript.
+    globals: Vec<(&'static str, String)>,
+    timeout: Duration,
+    memory_limit: usize,
+    reply: ScriptReply,
+}
+
+enum ScriptReply {
+    Sync(mpsc::Sender<Result<String, ScriptError>>),
+    Async(tokio::sync::oneshot::Sender<Result<String, ScriptError>>),
+}
+
+/// The dedicated thread owning the one persistent QuickJS `Runtime`.
+///
+/// `rquickjs::Runtime` is only `Send` under the experimental `parallel`
+/// feature, and building a runtime per evaluation rebuilt the entire JS heap
+/// for every assertion. Each job still gets a fresh `Context` (cheap next to
+/// the runtime), so scripts cannot observe each other. Evaluations serialize
+/// on this thread; each is bounded by its interrupt-handler timeout.
+fn script_worker() -> &'static mpsc::Sender<ScriptJob> {
+    static WORKER: OnceLock<mpsc::Sender<ScriptJob>> = OnceLock::new();
+    WORKER.get_or_init(|| {
+        let (sender, receiver) = mpsc::channel::<ScriptJob>();
+        std::thread::Builder::new()
+            .name("apitest-script".into())
+            .spawn(move || {
+                let mut runtime = None;
+                while let Ok(job) = receiver.recv() {
+                    let result = evaluate_job(&mut runtime, &job);
+                    match job.reply {
+                        ScriptReply::Sync(reply) => {
+                            let _ = reply.send(result);
+                        }
+                        ScriptReply::Async(reply) => {
+                            let _ = reply.send(result);
+                        }
+                    }
+                }
+            })
+            .expect("script worker thread should initialize");
+        sender
+    })
+}
+
+fn evaluate_job(
+    runtime_slot: &mut Option<Runtime>,
+    job: &ScriptJob,
+) -> Result<String, ScriptError> {
+    let runtime = match runtime_slot.as_ref() {
+        Some(runtime) => runtime,
+        None => runtime_slot.insert(Runtime::new()?),
+    };
+    runtime.set_memory_limit(job.memory_limit);
+    runtime.set_max_stack_size(512 * 1024);
+    let started = Instant::now();
+    let timeout = job.timeout;
+    runtime.set_interrupt_handler(Some(Box::new(move || started.elapsed() >= timeout)));
+    let context = Context::full(runtime)?;
+    let result = context.with(|ctx| {
+        let globals = ctx.globals();
+        for (name, value) in &job.globals {
+            globals.set(*name, value.as_str())?;
+        }
+        ctx.eval::<String, _>(job.source.as_bytes())
+    });
+    runtime.set_interrupt_handler(None);
+    let result = match result {
+        Ok(json) => Ok(json),
+        Err(_) if started.elapsed() >= timeout => Err(ScriptError::Timeout {
+            timeout_ms: timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+        }),
+        Err(error) => Err(ScriptError::Runtime(error)),
+    };
+    if result.is_err() {
+        // A timeout or memory-limit hit can leave the heap in a bad state;
+        // start the next evaluation from a fresh runtime instead of guessing.
+        *runtime_slot = None;
+    } else {
+        runtime_slot.as_ref().expect("runtime was created").run_gc();
+    }
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -56,15 +153,33 @@ impl ScriptEngine {
         variables: &BTreeMap<String, String>,
         response: Option<&ScriptResponse>,
     ) -> Result<ScriptResult, ScriptError> {
-        let variables = serde_json::to_string(variables)?;
-        let response = serde_json::to_string(&response.cloned().unwrap_or(ScriptResponse {
-            status: 0,
-            headers: BTreeMap::new(),
-            body: String::new(),
-        }))?;
-        let source = script_source(script, &variables, &response);
+        let (source, globals) = self.request_payload(script, variables, response)?;
+        let json = self.evaluate(source, globals)?;
+        serde_json::from_str(&json).map_err(|error| ScriptError::InvalidResult(error.to_string()))
+    }
 
-        let json = self.evaluate(source)?;
+    /// `run` without parking a tokio worker on the reply: awaits the script
+    /// thread through a oneshot channel instead.
+    pub async fn run_async(
+        &self,
+        script: &str,
+        variables: &BTreeMap<String, String>,
+        response: Option<&ScriptResponse>,
+    ) -> Result<ScriptResult, ScriptError> {
+        let (source, globals) = self.request_payload(script, variables, response)?;
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        script_worker()
+            .send(ScriptJob {
+                source,
+                globals,
+                timeout: self.timeout,
+                memory_limit: self.memory_limit,
+                reply: ScriptReply::Async(reply),
+            })
+            .map_err(|_| ScriptError::WorkerUnavailable)?;
+        let json = receiver
+            .await
+            .map_err(|_| ScriptError::WorkerUnavailable)??;
         serde_json::from_str(&json).map_err(|error| ScriptError::InvalidResult(error.to_string()))
     }
 
@@ -76,27 +191,54 @@ impl ScriptEngine {
     ) -> Result<serde_json::Value, ScriptError> {
         let request = serde_json::to_string(request)?;
         let response = serde_json::to_string(response)?;
-        let source = mock_script_source(script, &request, &response);
-        let json = self.evaluate(source)?;
+        let source = mock_script_source(script);
+        let globals = vec![
+            ("__APITEST_REQUEST", request),
+            ("__APITEST_RESPONSE", response),
+        ];
+        let json = self.evaluate(source, globals)?;
         serde_json::from_str(&json).map_err(|error| ScriptError::InvalidResult(error.to_string()))
     }
 
-    fn evaluate(&self, source: String) -> Result<String, ScriptError> {
-        let runtime = Runtime::new()?;
-        runtime.set_memory_limit(self.memory_limit);
-        runtime.set_max_stack_size(512 * 1024);
-        let started = std::time::Instant::now();
-        let timeout = self.timeout;
-        runtime.set_interrupt_handler(Some(Box::new(move || started.elapsed() >= timeout)));
+    fn request_payload(
+        &self,
+        script: &str,
+        variables: &BTreeMap<String, String>,
+        response: Option<&ScriptResponse>,
+    ) -> Result<ScriptPayload, ScriptError> {
+        let variables = serde_json::to_string(variables)?;
+        let response = serde_json::to_string(&response.cloned().unwrap_or(ScriptResponse {
+            status: 0,
+            headers: BTreeMap::new(),
+            body: String::new(),
+        }))?;
+        Ok((
+            script_source(script),
+            vec![
+                ("__APITEST_VARIABLES", variables),
+                ("__APITEST_RESPONSE", response),
+            ],
+        ))
+    }
 
-        let context = Context::full(&runtime)?;
-        match context.with(|ctx| ctx.eval::<String, _>(source)) {
-            Ok(json) => Ok(json),
-            Err(_) if started.elapsed() >= timeout => Err(ScriptError::Timeout {
-                timeout_ms: timeout.as_millis().min(u128::from(u64::MAX)) as u64,
-            }),
-            Err(error) => Err(ScriptError::Runtime(error)),
-        }
+    fn evaluate(
+        &self,
+        source: String,
+        globals: Vec<(&'static str, String)>,
+    ) -> Result<String, ScriptError> {
+        let (reply, receiver) = mpsc::channel();
+        script_worker()
+            .send(ScriptJob {
+                source,
+                globals,
+                timeout: self.timeout,
+                memory_limit: self.memory_limit,
+                reply: ScriptReply::Sync(reply),
+            })
+            .map_err(|_| ScriptError::WorkerUnavailable)?;
+        receiver
+            .recv()
+            .map_err(|_| ScriptError::WorkerUnavailable)?
     }
 }
 
@@ -106,12 +248,12 @@ impl Default for ScriptEngine {
     }
 }
 
-fn script_source(script: &str, variables: &str, response: &str) -> String {
+fn script_source(script: &str) -> String {
     format!(
         r#"
         (() => {{
-            const __state = {{ variables: {variables}, assertions: [] }};
-            const __rawResponse = {response};
+            const __state = {{ variables: JSON.parse(globalThis.__APITEST_VARIABLES), assertions: [] }};
+            const __rawResponse = JSON.parse(globalThis.__APITEST_RESPONSE);
             const response = {{
                 ...__rawResponse,
                 json() {{ return JSON.parse(this.body); }}
@@ -272,12 +414,12 @@ fn script_source(script: &str, variables: &str, response: &str) -> String {
     )
 }
 
-fn mock_script_source(script: &str, request: &str, response: &str) -> String {
+fn mock_script_source(script: &str) -> String {
     format!(
         r#"
         (() => {{
-            const request = Object.freeze({request});
-            const response = {response};
+            const request = Object.freeze(JSON.parse(globalThis.__APITEST_REQUEST));
+            const response = JSON.parse(globalThis.__APITEST_RESPONSE);
             const pm = {{ request, response }};
             globalThis.request = request;
             globalThis.response = response;

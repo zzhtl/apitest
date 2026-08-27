@@ -206,7 +206,7 @@ async fn schema_assertions_validate_the_contract_response_schema() {
     let report = runner
         .run_test_scenario(
             scenario,
-            HashMap::from([(case_id, case)]),
+            std::sync::Arc::new(HashMap::from([(case_id, case)])),
             BTreeMap::new(),
             CancellationToken::new(),
         )
@@ -285,7 +285,12 @@ async fn runs_nested_conditions_loops_assertions_and_extractors() {
     ]);
 
     let report = runner
-        .run_test_scenario(scenario, cases, BTreeMap::new(), CancellationToken::new())
+        .run_test_scenario(
+            scenario,
+            std::sync::Arc::new(cases),
+            BTreeMap::new(),
+            CancellationToken::new(),
+        )
         .await
         .expect("structured scenario should run");
 
@@ -335,7 +340,12 @@ async fn stops_structured_scenario_after_failed_assertion() {
     ]);
 
     let report = runner
-        .run_test_scenario(scenario, cases, BTreeMap::new(), CancellationToken::new())
+        .run_test_scenario(
+            scenario,
+            std::sync::Arc::new(cases),
+            BTreeMap::new(),
+            CancellationToken::new(),
+        )
         .await
         .expect("assertion failures belong in the report");
 

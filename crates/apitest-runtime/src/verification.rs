@@ -197,11 +197,40 @@ pub fn validate_response_schema(
     let instance = serde_json::from_str::<Value>(body)
         .map_err(|error| format!("response is not valid JSON: {error}"))?;
     let schema = schema_document(&content.schema, &contract.components);
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|error| format!("contract response schema is invalid: {error}"))?;
+    let validator = cached_validator(&schema)?;
     validator
         .validate(&instance)
         .map_err(|error| format!("response does not match contract schema: {error}"))
+}
+
+/// Compile (or fetch) the validator for `schema`.
+///
+/// Contracts are rebuilt per send, so the cache keys on the serialized schema
+/// itself; compiling a validator per assertion dwarfed the validation.
+fn cached_validator(schema: &Value) -> Result<std::sync::Arc<jsonschema::Validator>, String> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Arc<jsonschema::Validator>>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = schema.to_string();
+    if let Some(validator) = cache
+        .lock()
+        .expect("schema validator cache should not be poisoned")
+        .get(&key)
+    {
+        return Ok(Arc::clone(validator));
+    }
+    let validator = jsonschema::validator_for(schema)
+        .map_err(|error| format!("contract response schema is invalid: {error}"))?;
+    let validator = Arc::new(validator);
+    let mut cache = cache
+        .lock()
+        .expect("schema validator cache should not be poisoned");
+    if cache.len() >= 32 {
+        cache.clear();
+    }
+    cache.insert(key, Arc::clone(&validator));
+    Ok(validator)
 }
 
 pub fn schema_document(schema: &ApiSchema, components: &ApiComponents) -> Value {

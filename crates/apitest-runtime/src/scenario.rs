@@ -85,6 +85,10 @@ pub struct ScenarioRunner {
     scripts: ScriptEngine,
 }
 
+/// Cap on the response body a scenario step keeps for assertions, matching
+/// the interactive preview limit.
+const MAX_SCENARIO_BODY_BYTES: usize = 10 * 1024 * 1024;
+
 impl ScenarioRunner {
     pub fn new() -> Self {
         Self {
@@ -208,7 +212,7 @@ impl ScenarioRunner {
     pub async fn run_test_scenario(
         &self,
         scenario: TestScenario,
-        cases: HashMap<EntityId, ScenarioCase>,
+        cases: Arc<HashMap<EntityId, ScenarioCase>>,
         initial_variables: BTreeMap<String, String>,
         cancellation: CancellationToken,
     ) -> Result<ScenarioReport, ScenarioError> {
@@ -379,7 +383,11 @@ impl ScenarioRunner {
     ) -> Result<StepReport, ScenarioError> {
         let mut script_assertions = Vec::new();
         if !case.pre_script.trim().is_empty() {
-            match self.scripts.run(&case.pre_script, variables, None) {
+            match self
+                .scripts
+                .run_async(&case.pre_script, variables, None)
+                .await
+            {
                 Ok(result) => {
                     *variables = result.variables;
                     script_assertions = result.assertions;
@@ -440,7 +448,10 @@ impl ScenarioRunner {
                     }
                 }
                 Ok(ExecutionEvent::Data(data)) | Ok(ExecutionEvent::Message { data, .. }) => {
-                    body.extend_from_slice(&data);
+                    // Assertions never need more than the UI preview keeps; an
+                    // uncapped buffer let one huge endpoint exhaust memory.
+                    let available = MAX_SCENARIO_BODY_BYTES.saturating_sub(body.len());
+                    body.extend_from_slice(&data[..data.len().min(available)]);
                 }
                 Ok(ExecutionEvent::Metrics(value)) | Ok(ExecutionEvent::Completed(value)) => {
                     metrics = Some(value);
@@ -492,7 +503,8 @@ impl ScenarioRunner {
             if response.error.is_none() && !case.post_script.trim().is_empty() {
                 match self
                     .scripts
-                    .run(&case.post_script, variables, Some(&script_response))
+                    .run_async(&case.post_script, variables, Some(&script_response))
+                    .await
                 {
                     Ok(result) => {
                         *variables = result.variables;
