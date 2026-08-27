@@ -20,7 +20,35 @@ ApiTest 是一个使用 Rust 与 egui 构建的本地优先 API 桌面工具。�
 - 本地 Mock 服务、OpenAPI 导入导出与静态文档、Postman/HAR/cURL 互操作。
 - cURL、JavaScript fetch、Python requests、Rust reqwest 代码片段生成。
 
-## 运行
+## 安装
+
+Linux 与 macOS 一键安装最新版（下载对应平台的发布包、校验 SHA256 后装入 `~/.local/bin`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zzhtl/apitest/main/install.sh | sh
+```
+
+可选环境变量：`APITEST_VERSION=v0.1.0` 安装指定版本，`APITEST_INSTALL_DIR` 更换安装目录。
+
+也可以从 [Releases](https://github.com/zzhtl/apitest/releases) 手动下载：
+
+| 平台 | 产物 |
+| --- | --- |
+| Linux x86_64 | `apitest-v{版本}-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux arm64 | `apitest-v{版本}-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Intel | `apitest-v{版本}-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `apitest-v{版本}-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `apitest-v{版本}-x86_64-pc-windows-msvc.zip` |
+
+每个发布附带 `SHA256SUMS` 供校验。
+
+运行时依赖：
+
+- **Linux**：Vulkan 图形驱动（如 `mesa-vulkan-drivers`）、`libxkbcommon`；保存密钥需要 Secret Service 守护进程（gnome-keyring 或 KWallet）。
+- **macOS**：发布包未签名，首次启动被 Gatekeeper 拦截时执行 `xattr -d com.apple.quarantine "$(command -v apitest)"`。
+- 界面中文依赖系统 CJK 字体（如 `Noto Sans CJK SC`、思源黑体、微软雅黑、苹方）。若一个都没有，启动时会明确提示，而不是静默显示方块。
+
+## 从源码运行
 
 需要 Rust 1.97.0。仓库中的 `rust-toolchain.toml` 会选择正确工具链。
 
@@ -29,8 +57,6 @@ cargo run -p apitest-app --release
 ```
 
 Linux 桌面环境若缺少窗口系统开发库，请安装发行版对应的 X11/Wayland、`libxkbcommon` 和 `pkg-config` 包。
-
-界面中文依赖系统安装的 CJK 字体（如 `Noto Sans CJK SC`、思源黑体、微软雅黑、苹方）。若一个都没有，启动时会明确提示，而不是静默显示方块。
 
 ## 质量检查
 

@@ -3,6 +3,8 @@ name = "apitest-app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+description = "Local-first API desktop workbench built with Rust and egui"
 
 [[bin]]
 name = "apitest"

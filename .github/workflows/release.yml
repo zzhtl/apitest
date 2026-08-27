@@ -1,0 +1,113 @@
+# Tag-triggered release: build the desktop binary natively on every supported
+# platform, package it with checksums, and publish a GitHub Release.
+#
+# Native runners per target on purpose: aws-lc-sys, rquickjs-sys and bundled
+# SQLite all compile C, which makes cross-compilation the risky path.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  BINARY: apitest
+
+jobs:
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Tag must match the workspace version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          tag="${tag%%-*}"
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if [ "$tag" != "$version" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match workspace version ${version}" >&2
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2.9.1
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked -p apitest-app
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          archive="${BINARY}-v${version}-${{ matrix.target }}.tar.gz"
+          staging="$(mktemp -d)"
+          cp "target/release/${BINARY}" README.md LICENSE-MIT LICENSE-APACHE "$staging/"
+          tar -C "$staging" -czf "$archive" .
+          mkdir -p dist && mv "$archive" dist/
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          $archive = "$env:BINARY-v$version-${{ matrix.target }}.zip"
+          $staging = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP "staging")
+          Copy-Item "target/release/$env:BINARY.exe", "README.md", "LICENSE-MIT", "LICENSE-APACHE" $staging
+          Compress-Archive -Path "$staging/*" -DestinationPath $archive
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Move-Item $archive dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "ApiTest $GITHUB_REF_NAME" \
+            --generate-notes \
+            $prerelease \
+            dist/*
