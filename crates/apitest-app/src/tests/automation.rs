@@ -10,8 +10,16 @@ use egui_kittest::Harness;
 use indexmap::IndexMap;
 
 use super::support::{mock_get, test_app};
+use crate::i18n::Language;
 use crate::services::loader::{load_automation, load_document_tabs};
 use crate::services::scenario::load_scenario_datasets;
+
+/// English fixture wrapper so the error-content assertions stay stable.
+fn load_scenario_datasets_en(
+    path: Option<&str>,
+) -> Result<Vec<std::collections::BTreeMap<String, String>>, String> {
+    load_scenario_datasets(path, Language::English)
+}
 use crate::state::action::PendingAction;
 use crate::workbench::{DocumentId, DocumentKind};
 
@@ -137,7 +145,7 @@ fn scenario_datasets_load_json_and_csv_rows_and_reject_invalid_shapes() {
         .expect("JSON dataset should create");
     json.write_all(br#"[{"tenant":"alpha","limit":2},{"tenant":"beta","limit":3}]"#)
         .expect("JSON dataset should write");
-    let json_rows = load_scenario_datasets(Some(
+    let json_rows = load_scenario_datasets_en(Some(
         json.path()
             .to_str()
             .expect("temporary path should be UTF-8"),
@@ -156,7 +164,7 @@ fn scenario_datasets_load_json_and_csv_rows_and_reject_invalid_shapes() {
         .expect("CSV dataset should create");
     csv.write_all(b"tenant,enabled\nalpha,true\nbeta,false\n")
         .expect("CSV dataset should write");
-    let csv_rows = load_scenario_datasets(Some(
+    let csv_rows = load_scenario_datasets_en(Some(
         csv.path().to_str().expect("temporary path should be UTF-8"),
     ))
     .expect("CSV dataset should load");
@@ -170,7 +178,7 @@ fn scenario_datasets_load_json_and_csv_rows_and_reject_invalid_shapes() {
     invalid
         .write_all(br#"["not an object"]"#)
         .expect("invalid dataset should write");
-    let error = load_scenario_datasets(Some(
+    let error = load_scenario_datasets_en(Some(
         invalid
             .path()
             .to_str()

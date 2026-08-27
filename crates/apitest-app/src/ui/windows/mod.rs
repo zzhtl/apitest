@@ -5,7 +5,7 @@ pub(crate) mod snippet;
 use std::time::Duration;
 
 use apitest_interop::{OpenApiIssueLevel, validate_openapi};
-use eframe::egui::{self, RichText, Stroke, Vec2};
+use eframe::egui::{self, RichText, Stroke};
 
 use crate::app::{ApiTestApp, LANGUAGE_SETTING, THEME_SETTING};
 use crate::i18n::Language;
@@ -279,7 +279,7 @@ impl ApiTestApp {
             Confirmation::Unsaved(_) => self.tr("未保存的更改", "Unsaved changes"),
             Confirmation::DeleteRequest(_) => self.tr("删除请求", "Delete request"),
             Confirmation::DeleteEnvironment(_) => self.tr("删除环境", "Delete environment"),
-            Confirmation::DeleteFolder(_) => self.tr("删除文件夹", "Delete folder"),
+            Confirmation::DeleteFolder { .. } => self.tr("删除文件夹", "Delete folder"),
             Confirmation::DeleteScenario(_) => self.tr("删除场景", "Delete scenario"),
             Confirmation::DeleteMock(_) => self.tr("删除 Mock", "Delete mock"),
         };
@@ -303,17 +303,16 @@ impl ApiTestApp {
                 )
                 .to_owned(),
             // Spell out the blast radius: a folder takes its requests with it.
-            Confirmation::DeleteFolder(node) => {
-                let count = self.folder_request_count(node);
-                match self.language {
-                    Language::Chinese => {
-                        format!("该文件夹及其中的 {count} 个请求（含本地密钥）将被删除。")
-                    }
-                    Language::English => format!(
-                        "This folder and the {count} requests inside it will be deleted, along with their local secrets."
-                    ),
+            // The count was computed when the confirmation was raised, so the
+            // dialog does not query the database on every frame it stays open.
+            Confirmation::DeleteFolder { requests, .. } => match self.language {
+                Language::Chinese => {
+                    format!("该文件夹及其中的 {requests} 个请求（含本地密钥）将被删除。")
                 }
-            }
+                Language::English => format!(
+                    "This folder and the {requests} requests inside it will be deleted, along with their local secrets."
+                ),
+            },
             Confirmation::DeleteScenario(_) => self
                 .tr("该测试场景将被删除。", "This scenario will be deleted.")
                 .to_owned(),
@@ -328,45 +327,47 @@ impl ApiTestApp {
         let mut discard = false;
         let mut confirm_delete = false;
         let mut cancel = false;
-        egui::Window::new(title)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .resizable(false)
-            .collapsible(false)
-            .show(context, |ui| {
-                ui.set_min_width(340.0);
-                ui.label(&message);
-                ui.add_space(12.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    match confirmation {
-                        Confirmation::Unsaved(_) => {
-                            if ui.button(self.tr("保存", "Save")).clicked() {
-                                save = true;
-                            }
-                            if ui.button(self.tr("放弃", "Discard")).clicked() {
-                                discard = true;
-                            }
+        // A modal blocks the workspace behind it and closes on Esc or a click
+        // on the backdrop — both mean "cancel", never the destructive choice.
+        let modal = egui::Modal::new(egui::Id::new("confirmation_modal")).show(context, |ui| {
+            ui.set_min_width(340.0);
+            ui.label(RichText::new(title).strong().size(15.0));
+            ui.add_space(6.0);
+            ui.label(&message);
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                match confirmation {
+                    Confirmation::Unsaved(_) => {
+                        if ui.button(self.tr("保存", "Save")).clicked() {
+                            save = true;
                         }
-                        Confirmation::DeleteRequest(_)
-                        | Confirmation::DeleteEnvironment(_)
-                        | Confirmation::DeleteFolder(_)
-                        | Confirmation::DeleteScenario(_)
-                        | Confirmation::DeleteMock(_) => {
-                            if ui
-                                .button(
-                                    RichText::new(self.tr("删除", "Delete"))
-                                        .color(ui.palette().danger),
-                                )
-                                .clicked()
-                            {
-                                confirm_delete = true;
-                            }
+                        if ui.button(self.tr("放弃", "Discard")).clicked() {
+                            discard = true;
                         }
                     }
-                    if ui.button(self.tr("取消", "Cancel")).clicked() {
-                        cancel = true;
+                    Confirmation::DeleteRequest(_)
+                    | Confirmation::DeleteEnvironment(_)
+                    | Confirmation::DeleteFolder { .. }
+                    | Confirmation::DeleteScenario(_)
+                    | Confirmation::DeleteMock(_) => {
+                        if ui
+                            .button(
+                                RichText::new(self.tr("删除", "Delete")).color(ui.palette().danger),
+                            )
+                            .clicked()
+                        {
+                            confirm_delete = true;
+                        }
                     }
-                });
+                }
+                if ui.button(self.tr("取消", "Cancel")).clicked() {
+                    cancel = true;
+                }
             });
+        });
+        if modal.should_close() {
+            cancel = true;
+        }
         if cancel {
             self.confirmation = None;
         } else if save {
@@ -400,7 +401,7 @@ impl ApiTestApp {
             match confirmation {
                 Confirmation::DeleteRequest(id) => self.delete_request(id),
                 Confirmation::DeleteEnvironment(id) => self.delete_environment(id),
-                Confirmation::DeleteFolder(id) => self.delete_folder(id),
+                Confirmation::DeleteFolder { node, .. } => self.delete_folder(node),
                 Confirmation::DeleteScenario(id) => self.delete_scenario(id),
                 Confirmation::DeleteMock(id) => self.delete_mock(id),
                 Confirmation::Unsaved(_) => {}

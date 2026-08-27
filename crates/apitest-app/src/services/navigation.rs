@@ -5,6 +5,7 @@ use apitest_storage::PageRequest;
 
 use crate::app::{ACTIVE_PROJECT_SETTING, ApiTestApp};
 use crate::environment::EnvironmentDraft;
+use crate::i18n::Language;
 use crate::services::document::document_snapshot;
 use crate::services::history::HISTORY_MAX_RECORDS;
 use crate::services::loader::{
@@ -381,8 +382,26 @@ impl ApiTestApp {
         }
         let project_id = self.project.id;
         self.persist_setting(ACTIVE_PROJECT_SETTING, &project_id);
-        if let Some(error) = errors.into_iter().last() {
-            self.toast(ToastKind::Error, error);
+        if !errors.is_empty() {
+            // Show every load failure, not just the last one; cap the toast so a
+            // corrupt project cannot fill the screen.
+            const SHOWN: usize = 5;
+            let total = errors.len();
+            let mut message = errors
+                .into_iter()
+                .take(SHOWN)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if total > SHOWN {
+                message.push_str(&format!(
+                    "\n{}",
+                    match self.language {
+                        Language::Chinese => format!("… 以及另外 {} 个错误", total - SHOWN),
+                        Language::English => format!("… and {} more errors", total - SHOWN),
+                    }
+                ));
+            }
+            self.toast(ToastKind::Error, message);
         }
     }
 

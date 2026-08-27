@@ -135,7 +135,11 @@ impl ApiTestApp {
             InteropAction::ImportCurl => {
                 vec![import_curl(source).map_err(|error| error.to_string())?]
             }
-            _ => return Err("unsupported import action".into()),
+            _ => {
+                return Err(self
+                    .tr("不支持的导入类型", "unsupported import action")
+                    .into());
+            }
         };
         self.queue_imported_definitions(definitions)
     }

@@ -14,7 +14,11 @@ pub(crate) const RESOURCE_PAGE_SIZE: usize = 100;
 
 pub(crate) fn open_database() -> Result<Database, String> {
     let directory = directories::ProjectDirs::from("io.github", "zzhtl", "ApiTest")
-        .ok_or_else(|| "failed to resolve the application data directory".to_owned())?;
+        // Runs before the language setting can be loaded, so the message is
+        // bilingual instead of routed through `tr`.
+        .ok_or_else(|| {
+            "无法定位应用数据目录 (failed to resolve the application data directory)".to_owned()
+        })?;
     let startup =
         open_workspace_database(directory.data_local_dir()).map_err(|error| error.to_string())?;
     if let Some(path) = startup.legacy_archive {

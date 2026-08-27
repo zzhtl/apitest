@@ -55,8 +55,12 @@ impl ApiTestApp {
                         .into());
                 }
                 if !spec.variables.trim().is_empty() {
-                    serde_json::from_str::<serde_json::Value>(&spec.variables)
-                        .map_err(|error| format!("GraphQL variables: {error}"))?;
+                    serde_json::from_str::<serde_json::Value>(&spec.variables).map_err(
+                        |error| match self.language {
+                            Language::Chinese => format!("GraphQL 变量无效：{error}"),
+                            Language::English => format!("GraphQL variables: {error}"),
+                        },
+                    )?;
                 }
                 Ok(())
             }
@@ -100,7 +104,10 @@ impl ApiTestApp {
                 } else {
                     serde_json::from_str::<serde_json::Value>(&spec.message_json)
                         .map(|_| ())
-                        .map_err(|error| format!("gRPC JSON: {error}"))
+                        .map_err(|error| match self.language {
+                            Language::Chinese => format!("gRPC 消息 JSON 无效：{error}"),
+                            Language::English => format!("gRPC JSON: {error}"),
+                        })
                 }
             }
         }
@@ -135,7 +142,10 @@ impl ApiTestApp {
                 document,
                 HistoryRunState::Cancelled,
                 metrics,
-                Some("superseded by a new execution".into()),
+                Some(
+                    self.tr("已被新的执行取代", "superseded by a new execution")
+                        .into(),
+                ),
             );
         }
         let run = self.sessions.next_run();

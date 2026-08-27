@@ -68,19 +68,31 @@ impl ApiTestApp {
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(if dirty {
-                                self.tr("有未保存的更改", "Unsaved changes")
-                            } else {
-                                self.tr("已保存", "Saved")
-                            })
-                            .small()
-                            .color(if dirty {
-                                palette.warning
-                            } else {
-                                palette.muted
-                            }),
-                        );
+                        if self.storage_worker.is_none() {
+                            // Without a database nothing can be saved; a persistent
+                            // notice beats the toast the failed save would spam.
+                            ui.label(
+                                RichText::new(
+                                    self.tr("本地存储不可用", "Local storage unavailable"),
+                                )
+                                .small()
+                                .color(palette.danger),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(if dirty {
+                                    self.tr("有未保存的更改", "Unsaved changes")
+                                } else {
+                                    self.tr("已保存", "Saved")
+                                })
+                                .small()
+                                .color(if dirty {
+                                    palette.warning
+                                } else {
+                                    palette.muted
+                                }),
+                            );
+                        }
                         if let Some((label, tone)) = run {
                             ui.separator();
                             ui.label(RichText::new(label).small().color(tone.foreground(palette)));

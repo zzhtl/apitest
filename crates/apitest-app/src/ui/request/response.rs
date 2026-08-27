@@ -12,6 +12,9 @@ use crate::ui::code::code_view;
 use crate::ui::json_tree::json_tree;
 use crate::ui::widgets::{Tone, badge, empty_state, icon_button, tab_button};
 
+/// Fixed id of the find-in-response field so Ctrl+F can focus it.
+pub(crate) const RESPONSE_FIND_FIELD_ID: &str = "response_find_field";
+
 impl ApiTestApp {
     pub(crate) fn response_panel(&mut self, ui: &mut egui::Ui) {
         let palette = ui.palette();
@@ -205,6 +208,7 @@ impl ApiTestApp {
             ui.add_sized(
                 [180.0, 24.0],
                 egui::TextEdit::singleline(&mut search)
+                    .id(egui::Id::new(RESPONSE_FIND_FIELD_ID))
                     .hint_text(self.tr("在响应中查找", "Find in response")),
             );
             if !search.is_empty() {

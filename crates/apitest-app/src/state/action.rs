@@ -140,7 +140,11 @@ pub(crate) enum Confirmation {
     Unsaved(PendingAction),
     DeleteRequest(EntityId),
     DeleteEnvironment(EntityId),
-    DeleteFolder(EntityId),
+    DeleteFolder {
+        node: EntityId,
+        /// Number of requests inside, counted once when the dialog is raised.
+        requests: usize,
+    },
     DeleteScenario(EntityId),
     DeleteMock(EntityId),
 }

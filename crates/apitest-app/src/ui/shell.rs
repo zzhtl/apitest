@@ -7,9 +7,11 @@ use crate::i18n::Language;
 use crate::services::loader::active_environment_setting;
 use crate::services::tree::TreeAction;
 use crate::state::action::{InteropAction, PendingAction, ToastKind};
+use crate::state::response::ResponseTab;
 use crate::state::workspace::Navigation;
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::{self, ThemeMode, UiExt};
+use crate::ui::request::response::RESPONSE_FIND_FIELD_ID;
 use crate::ui::sidebar::protocol_creation_menu;
 use crate::ui::widgets::{icon_button, rail_button};
 
@@ -20,12 +22,16 @@ impl ApiTestApp {
     pub(crate) const SHORTCUTS: &'static [(&'static str, &'static str, &'static str)] = &[
         ("Ctrl Enter", "发送请求", "Send request"),
         ("F5", "重新发送", "Resend"),
+        ("Shift F5", "停止请求", "Stop the run"),
         ("Ctrl S", "保存", "Save"),
         ("Ctrl N", "新建请求", "New request"),
         ("Ctrl D", "复制当前请求", "Duplicate request"),
         ("Ctrl W", "关闭当前标签", "Close tab"),
         ("Ctrl Tab", "下一个标签", "Next tab"),
         ("Ctrl Shift Tab", "上一个标签", "Previous tab"),
+        ("Ctrl 1..9", "切换到第 N 个标签", "Jump to tab N"),
+        ("Ctrl F", "在响应中查找", "Find in response"),
+        ("Ctrl L", "聚焦接口筛选", "Focus the API filter"),
         ("Ctrl Shift F", "格式化 JSON 请求体", "Format the JSON body"),
         ("Ctrl K", "命令面板", "Command palette"),
         ("Esc", "关闭弹层", "Dismiss overlays"),
@@ -39,21 +45,41 @@ impl ApiTestApp {
         if self.show_palette || self.rename_target.is_some() {
             return;
         }
+        // A focused text field owns plain keys: Esc must release focus instead
+        // of dismissing overlays, and F5 must not resend mid-edit. Modified
+        // chords (Ctrl …) stay live because they never insert text.
+        let typing = context.egui_wants_keyboard_input();
         let keys = context.input(|input| {
             let command = input.modifiers.command;
             let shift = input.modifiers.shift;
             Keys {
                 send: command && input.key_pressed(egui::Key::Enter),
-                resend: input.key_pressed(egui::Key::F5),
+                resend: !typing && !shift && input.key_pressed(egui::Key::F5),
+                stop: shift && input.key_pressed(egui::Key::F5),
                 save: command && input.key_pressed(egui::Key::S),
                 new_request: command && !shift && input.key_pressed(egui::Key::N),
                 duplicate: command && input.key_pressed(egui::Key::D),
                 close_tab: command && input.key_pressed(egui::Key::W),
                 next_tab: command && !shift && input.key_pressed(egui::Key::Tab),
                 previous_tab: command && shift && input.key_pressed(egui::Key::Tab),
+                find: command && !shift && input.key_pressed(egui::Key::F),
+                focus_search: command && input.key_pressed(egui::Key::L),
                 format: command && shift && input.key_pressed(egui::Key::F),
                 palette: command && input.key_pressed(egui::Key::K),
-                escape: input.key_pressed(egui::Key::Escape),
+                escape: !typing && input.key_pressed(egui::Key::Escape),
+                tab_jump: [
+                    egui::Key::Num1,
+                    egui::Key::Num2,
+                    egui::Key::Num3,
+                    egui::Key::Num4,
+                    egui::Key::Num5,
+                    egui::Key::Num6,
+                    egui::Key::Num7,
+                    egui::Key::Num8,
+                    egui::Key::Num9,
+                ]
+                .iter()
+                .position(|key| command && input.key_pressed(*key)),
             }
         });
         if keys.palette {
@@ -69,6 +95,9 @@ impl ApiTestApp {
         }
         if (keys.send || keys.resend) && self.navigation == Navigation::Api {
             self.send_current(context);
+        }
+        if keys.stop {
+            self.stop();
         }
         if keys.save {
             self.save_current();
@@ -90,6 +119,20 @@ impl ApiTestApp {
         }
         if keys.next_tab || keys.previous_tab {
             self.cycle_document(keys.next_tab);
+        }
+        if let Some(index) = keys.tab_jump
+            && let Some(tab) = self.document_tabs.items().get(index)
+        {
+            let id = tab.id;
+            self.activate_document(id);
+        }
+        if keys.find && self.navigation == Navigation::Api {
+            self.session_mut().response_tab = ResponseTab::Body;
+            context
+                .memory_mut(|memory| memory.request_focus(egui::Id::new(RESPONSE_FIND_FIELD_ID)));
+        }
+        if keys.focus_search {
+            context.memory_mut(|memory| memory.request_focus(egui::Id::new(SEARCH_FIELD_ID)));
         }
         if keys.format {
             self.format_current_body();
@@ -202,7 +245,8 @@ impl ApiTestApp {
                     ui.add_sized(
                         [200.0, 32.0],
                         egui::TextEdit::singleline(&mut self.search)
-                            .id_source(SEARCH_FIELD_ID)
+                            // A fixed id so Ctrl+L can focus the field from anywhere.
+                            .id(egui::Id::new(SEARCH_FIELD_ID))
                             .hint_text(search_hint),
                     );
                     if icon_button(ui, "search", palette_tip).clicked() {
@@ -495,13 +539,18 @@ impl ApiTestApp {
 struct Keys {
     send: bool,
     resend: bool,
+    stop: bool,
     save: bool,
     new_request: bool,
     duplicate: bool,
     close_tab: bool,
     next_tab: bool,
     previous_tab: bool,
+    find: bool,
+    focus_search: bool,
     format: bool,
     palette: bool,
     escape: bool,
+    /// Zero-based tab index selected via Ctrl+1..9.
+    tab_jump: Option<usize>,
 }

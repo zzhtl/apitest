@@ -8,6 +8,7 @@ use apitest_runtime::{
 use eframe::egui;
 
 use crate::app::ApiTestApp;
+use crate::i18n::Language;
 use crate::state::action::{RuntimeMessage, ToastKind};
 use crate::state::response::RunState;
 use crate::state::verification::VerificationOutcome;
@@ -17,6 +18,7 @@ use crate::workbench::DocumentId;
 /// The inputs a run needs before it can be judged, gathered on the UI thread so
 /// the evaluation itself can move to the background.
 struct VerificationJob {
+    language: Language,
     scripts: ScriptEngine,
     post_script: String,
     assertions: Vec<AssertionRule>,
@@ -142,12 +144,16 @@ impl ApiTestApp {
         let result = self
             .scripts
             .run(&script, &variables, None)
-            .map_err(|error| format!("pre-request script: {error}"))?;
+            .map_err(|error| match self.language {
+                Language::Chinese => format!("前置脚本：{error}"),
+                Language::English => format!("pre-request script: {error}"),
+            })?;
         if let Some(failed) = result.assertions.iter().find(|assertion| !assertion.passed) {
-            return Err(format!(
-                "pre-request assertion failed: {}",
-                failed.error.clone().unwrap_or_else(|| failed.name.clone())
-            ));
+            let detail = failed.error.clone().unwrap_or_else(|| failed.name.clone());
+            return Err(match self.language {
+                Language::Chinese => format!("前置断言未通过：{detail}"),
+                Language::English => format!("pre-request assertion failed: {detail}"),
+            });
         }
         Ok(result
             .variables
@@ -209,6 +215,7 @@ impl ApiTestApp {
             error: session.response.error.clone(),
         };
         Some(VerificationJob {
+            language: self.language,
             scripts: self.scripts.clone(),
             post_script,
             assertions,
@@ -305,7 +312,10 @@ fn evaluate(job: VerificationJob) -> VerificationOutcome {
                 outcome.extracted.push((rule.name.clone(), value));
             }
             Err(error) => {
-                outcome.error = Some(format!("failed to extract {}: {error}", rule.name));
+                outcome.error = Some(match job.language {
+                    Language::Chinese => format!("提取 {} 失败：{error}", rule.name),
+                    Language::English => format!("failed to extract {}: {error}", rule.name),
+                });
                 return outcome;
             }
         }
@@ -323,7 +333,12 @@ fn evaluate(job: VerificationJob) -> VerificationOutcome {
                     }
                 }
             }
-            Err(error) => outcome.error = Some(format!("post-response script: {error}")),
+            Err(error) => {
+                outcome.error = Some(match job.language {
+                    Language::Chinese => format!("后置脚本：{error}"),
+                    Language::English => format!("post-response script: {error}"),
+                });
+            }
         }
     }
     outcome

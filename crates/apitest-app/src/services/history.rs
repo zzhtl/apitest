@@ -6,6 +6,7 @@ use chrono::Utc;
 
 use crate::app::ApiTestApp;
 use crate::draft::BodyMode;
+use crate::i18n::Language;
 use crate::services::secrets::sensitive_name;
 use crate::state::action::ToastKind;
 use crate::state::response::MAX_RESPONSE_BYTES;
@@ -127,7 +128,10 @@ impl ApiTestApp {
             session.history_body = None;
             self.toast(
                 ToastKind::Error,
-                format!("failed to store response body: {error}"),
+                match self.language {
+                    Language::Chinese => format!("响应体写入失败：{error}"),
+                    Language::English => format!("failed to store response body: {error}"),
+                },
             );
         }
     }
@@ -245,14 +249,19 @@ impl ApiTestApp {
             return;
         };
         let Some(store) = &self.body_store else {
-            self.history_body_preview = "response body store is unavailable".into();
+            self.history_body_preview = self
+                .tr("响应体存储不可用", "response body store is unavailable")
+                .into();
             return;
         };
         let path = std::path::PathBuf::from(path);
         let size = match std::fs::metadata(&path) {
             Ok(metadata) => metadata.len(),
             Err(error) => {
-                self.history_body_preview = format!("failed to inspect response body: {error}");
+                self.history_body_preview = match self.language {
+                    Language::Chinese => format!("读取响应体信息失败：{error}"),
+                    Language::English => format!("failed to inspect response body: {error}"),
+                };
                 return;
             }
         };
@@ -262,7 +271,10 @@ impl ApiTestApp {
                 self.history_body_truncated = size > bytes.len() as u64;
             }
             Err(error) => {
-                self.history_body_preview = format!("failed to read response body: {error}");
+                self.history_body_preview = match self.language {
+                    Language::Chinese => format!("读取响应体失败：{error}"),
+                    Language::English => format!("failed to read response body: {error}"),
+                };
             }
         }
     }

@@ -110,10 +110,14 @@ impl ApiTestApp {
         notify: bool,
     ) -> bool {
         if self.storage_worker.is_none() {
-            self.toast(
-                ToastKind::Error,
-                self.tr("本地数据库不可用", "Local database unavailable"),
-            );
+            // Only manual saves report the missing database: autosave retries every
+            // frame and would otherwise queue an endless stream of error toasts.
+            if notify {
+                self.toast(
+                    ToastKind::Error,
+                    self.tr("本地数据库不可用", "Local database unavailable"),
+                );
+            }
             return false;
         }
         let Some(request) = self.requests.get(index) else {
@@ -137,7 +141,15 @@ impl ApiTestApp {
             }
         }
         if let Err(error) = self.persist_request_secret(index) {
-            self.toast(ToastKind::Error, error);
+            // Re-arm the debounce instead of leaving the autosave due on the next
+            // frame: a persistently failing keyring must not retry per frame.
+            let revision = self.requests[index].autosave.current_revision();
+            self.requests[index]
+                .autosave
+                .mark_failed(revision, Instant::now());
+            if notify {
+                self.toast(ToastKind::Error, error);
+            }
             return false;
         }
         self.requests[index].sync_edit_revision(Instant::now());
@@ -173,6 +185,9 @@ impl ApiTestApp {
     }
 
     pub(crate) fn schedule_request_autosaves(&mut self, context: &egui::Context) {
+        if self.storage_worker.is_none() {
+            return;
+        }
         let now = Instant::now();
         for request in &mut self.requests {
             request.sync_edit_revision(now);
@@ -223,23 +238,35 @@ impl ApiTestApp {
         notify: bool,
     ) -> bool {
         if self.storage_worker.is_none() {
-            self.toast(
-                ToastKind::Error,
-                self.tr("本地数据库不可用", "Local database unavailable"),
-            );
+            if notify {
+                self.toast(
+                    ToastKind::Error,
+                    self.tr("本地数据库不可用", "Local database unavailable"),
+                );
+            }
             return false;
         }
         if self.environments.get(index).is_none() {
             return false;
         }
         if let Err(error) = self.validate_environment(index) {
+            let revision = self.environments[index].autosave.current_revision();
+            self.environments[index]
+                .autosave
+                .mark_failed(revision, Instant::now());
             if validate {
                 self.toast(ToastKind::Error, error);
             }
             return false;
         }
         if let Err(error) = self.persist_environment_secrets(index) {
-            self.toast(ToastKind::Error, error);
+            let revision = self.environments[index].autosave.current_revision();
+            self.environments[index]
+                .autosave
+                .mark_failed(revision, Instant::now());
+            if notify {
+                self.toast(ToastKind::Error, error);
+            }
             return false;
         }
         self.environments[index].sync_edit_revision(Instant::now());
@@ -275,6 +302,9 @@ impl ApiTestApp {
     }
 
     pub(crate) fn schedule_environment_autosaves(&mut self, context: &egui::Context) {
+        if self.storage_worker.is_none() {
+            return;
+        }
         let now = Instant::now();
         for environment in &mut self.environments {
             environment.sync_edit_revision(now);

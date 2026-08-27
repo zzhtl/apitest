@@ -3,7 +3,7 @@ use apitest_runtime::{MockRoute, MockServer};
 use eframe::egui::{self};
 
 use crate::app::ApiTestApp;
-use crate::i18n::Language;
+use crate::i18n::{Language, tr};
 use crate::services::document::document_snapshot;
 use crate::state::action::{RuntimeMessage, ToastKind};
 use crate::workbench::{DocumentId, DocumentKind};
@@ -13,7 +13,7 @@ impl ApiTestApp {
         let Some(profile) = self.mock_profiles.get(self.selected_mock) else {
             return false;
         };
-        if let Err(error) = validate_mock_profile(profile) {
+        if let Err(error) = validate_mock_profile(profile, self.language) {
             self.toast(ToastKind::Error, error);
             return false;
         }
@@ -86,7 +86,7 @@ impl ApiTestApp {
         let Some(profile) = self.mock_profiles.get(self.selected_mock) else {
             return;
         };
-        if let Err(error) = validate_mock_profile(profile) {
+        if let Err(error) = validate_mock_profile(profile, self.language) {
             self.toast(ToastKind::Error, error);
             return;
         }
@@ -166,26 +166,45 @@ impl ApiTestApp {
     }
 }
 
-pub(crate) fn validate_mock_profile(profile: &MockProfile) -> Result<(), String> {
+pub(crate) fn validate_mock_profile(
+    profile: &MockProfile,
+    language: Language,
+) -> Result<(), String> {
     if profile.name.trim().is_empty() {
-        return Err("mock profile name cannot be empty".into());
+        return Err(tr(
+            language,
+            "Mock 配置名称不能为空",
+            "Mock profile name cannot be empty",
+        )
+        .into());
     }
     profile
         .bind_address
         .parse::<std::net::IpAddr>()
-        .map_err(|error| format!("invalid mock bind address: {error}"))?;
+        .map_err(|error| match language {
+            Language::Chinese => format!("Mock 绑定地址无效：{error}"),
+            Language::English => format!("invalid mock bind address: {error}"),
+        })?;
     for rule in &profile.rules {
         if rule.name.trim().is_empty() {
-            return Err("mock rule name cannot be empty".into());
+            return Err(tr(
+                language,
+                "Mock 规则名称不能为空",
+                "Mock rule name cannot be empty",
+            )
+            .into());
         }
         if !rule.path.starts_with('/') {
-            return Err(format!(
-                "mock rule `{}` path must start with `/`",
-                rule.name
-            ));
+            return Err(match language {
+                Language::Chinese => format!("Mock 规则 `{}` 的路径必须以 `/` 开头", rule.name),
+                Language::English => format!("mock rule `{}` path must start with `/`", rule.name),
+            });
         }
         if !(100..=599).contains(&rule.response.status) {
-            return Err(format!("mock rule `{}` has an invalid status", rule.name));
+            return Err(match language {
+                Language::Chinese => format!("Mock 规则 `{}` 的状态码无效", rule.name),
+                Language::English => format!("mock rule `{}` has an invalid status", rule.name),
+            });
         }
     }
     Ok(())

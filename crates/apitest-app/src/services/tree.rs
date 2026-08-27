@@ -26,7 +26,10 @@ impl ApiTestApp {
                 self.confirmation = Some(Confirmation::DeleteRequest(entity_id));
             }
             TreeAction::DeleteFolder { node } => {
-                self.confirmation = Some(Confirmation::DeleteFolder(node));
+                self.confirmation = Some(Confirmation::DeleteFolder {
+                    node,
+                    requests: self.folder_request_count(node),
+                });
             }
         }
     }

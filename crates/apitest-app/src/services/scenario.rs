@@ -9,6 +9,7 @@ use eframe::egui::{self};
 use tokio_util::sync::CancellationToken;
 
 use crate::app::ApiTestApp;
+use crate::i18n::{Language, tr};
 use crate::services::document::document_snapshot;
 use crate::state::action::{RuntimeMessage, ToastKind};
 use crate::state::workspace::WorkspaceRequest;
@@ -26,7 +27,8 @@ impl ApiTestApp {
             );
             return false;
         }
-        if let Err(error) = validate_scenario_nodes(&scenario.nodes, &self.requests) {
+        if let Err(error) = validate_scenario_nodes(&scenario.nodes, &self.requests, self.language)
+        {
             self.toast(ToastKind::Error, error);
             return false;
         }
@@ -68,7 +70,8 @@ impl ApiTestApp {
             );
             return;
         }
-        if let Err(error) = validate_scenario_nodes(&scenario.nodes, &self.requests) {
+        if let Err(error) = validate_scenario_nodes(&scenario.nodes, &self.requests, self.language)
+        {
             self.toast(ToastKind::Error, error);
             return;
         }
@@ -103,7 +106,8 @@ impl ApiTestApp {
             self.toast(ToastKind::Error, error);
             return;
         }
-        let datasets = match load_scenario_datasets(scenario.dataset_path.as_deref()) {
+        let datasets = match load_scenario_datasets(scenario.dataset_path.as_deref(), self.language)
+        {
             Ok(datasets) => datasets,
             Err(error) => {
                 self.toast(ToastKind::Error, error);
@@ -258,6 +262,7 @@ impl ApiTestApp {
 pub(crate) fn validate_scenario_nodes(
     nodes: &[ScenarioNode],
     requests: &[WorkspaceRequest],
+    language: Language,
 ) -> Result<(), String> {
     for node in nodes {
         match node {
@@ -266,16 +271,26 @@ pub(crate) fn validate_scenario_nodes(
                     .iter()
                     .any(|request| request.request_case.id == *case_id)
                 {
-                    return Err(format!(
-                        "scenario references missing request case {case_id}"
-                    ));
+                    return Err(match language {
+                        Language::Chinese => {
+                            format!("场景引用了不存在的请求用例 {case_id}")
+                        }
+                        Language::English => {
+                            format!("scenario references missing request case {case_id}")
+                        }
+                    });
                 }
             }
             ScenarioNode::Group { name, nodes } => {
                 if name.trim().is_empty() {
-                    return Err("scenario group name cannot be empty".into());
+                    return Err(tr(
+                        language,
+                        "场景分组名称不能为空",
+                        "Scenario group name cannot be empty",
+                    )
+                    .into());
                 }
-                validate_scenario_nodes(nodes, requests)?;
+                validate_scenario_nodes(nodes, requests, language)?;
             }
             ScenarioNode::If {
                 expression,
@@ -283,10 +298,15 @@ pub(crate) fn validate_scenario_nodes(
                 else_nodes,
             } => {
                 if expression.trim().is_empty() {
-                    return Err("scenario condition cannot be empty".into());
+                    return Err(tr(
+                        language,
+                        "场景条件表达式不能为空",
+                        "Scenario condition cannot be empty",
+                    )
+                    .into());
                 }
-                validate_scenario_nodes(then_nodes, requests)?;
-                validate_scenario_nodes(else_nodes, requests)?;
+                validate_scenario_nodes(then_nodes, requests, language)?;
+                validate_scenario_nodes(else_nodes, requests, language)?;
             }
             ScenarioNode::Loop {
                 source,
@@ -295,12 +315,22 @@ pub(crate) fn validate_scenario_nodes(
                 nodes,
             } => {
                 if source.trim().is_empty() || item_name.trim().is_empty() {
-                    return Err("scenario loop source and item name cannot be empty".into());
+                    return Err(tr(
+                        language,
+                        "场景循环的来源与项名称不能为空",
+                        "Scenario loop source and item name cannot be empty",
+                    )
+                    .into());
                 }
                 if *max_iterations == 0 {
-                    return Err("scenario loop iteration limit must be positive".into());
+                    return Err(tr(
+                        language,
+                        "场景循环次数上限必须大于 0",
+                        "Scenario loop iteration limit must be positive",
+                    )
+                    .into());
                 }
-                validate_scenario_nodes(nodes, requests)?;
+                validate_scenario_nodes(nodes, requests, language)?;
             }
             ScenarioNode::Delay { .. } => {}
         }
@@ -338,6 +368,7 @@ pub(crate) fn scenario_case_ids(nodes: &[ScenarioNode]) -> HashSet<EntityId> {
 
 pub(crate) fn load_scenario_datasets(
     path: Option<&str>,
+    language: Language,
 ) -> Result<Vec<BTreeMap<String, String>>, String> {
     let Some(path) = path else {
         return Ok(vec![BTreeMap::new()]);
@@ -349,36 +380,53 @@ pub(crate) fn load_scenario_datasets(
         .unwrap_or_default();
     let datasets = match extension.as_str() {
         "json" => {
-            let source = std::fs::read_to_string(path)
-                .map_err(|error| format!("failed to read scenario dataset: {error}"))?;
-            let value = serde_json::from_str::<serde_json::Value>(&source)
-                .map_err(|error| format!("invalid JSON scenario dataset: {error}"))?;
+            let source = std::fs::read_to_string(path).map_err(|error| match language {
+                Language::Chinese => format!("读取场景数据集失败：{error}"),
+                Language::English => format!("failed to read scenario dataset: {error}"),
+            })?;
+            let value =
+                serde_json::from_str::<serde_json::Value>(&source).map_err(
+                    |error| match language {
+                        Language::Chinese => format!("场景 JSON 数据集无效：{error}"),
+                        Language::English => format!("invalid JSON scenario dataset: {error}"),
+                    },
+                )?;
             match value {
                 serde_json::Value::Array(rows) => rows
                     .into_iter()
-                    .map(json_dataset_row)
+                    .map(|row| json_dataset_row(row, language))
                     .collect::<Result<Vec<_>, _>>()?,
                 serde_json::Value::Object(row) => {
-                    vec![json_dataset_row(serde_json::Value::Object(row))?]
+                    vec![json_dataset_row(serde_json::Value::Object(row), language)?]
                 }
                 _ => {
-                    return Err(
-                        "JSON scenario dataset must be an object or an array of objects".into(),
-                    );
+                    return Err(tr(
+                        language,
+                        "场景 JSON 数据集必须是对象或对象数组",
+                        "JSON scenario dataset must be an object or an array of objects",
+                    )
+                    .into());
                 }
             }
         }
         "csv" => {
-            let mut reader = csv::Reader::from_path(path)
-                .map_err(|error| format!("failed to read CSV scenario dataset: {error}"))?;
+            let mut reader = csv::Reader::from_path(path).map_err(|error| match language {
+                Language::Chinese => format!("读取场景 CSV 数据集失败：{error}"),
+                Language::English => format!("failed to read CSV scenario dataset: {error}"),
+            })?;
             let headers = reader
                 .headers()
-                .map_err(|error| format!("invalid CSV scenario dataset: {error}"))?
+                .map_err(|error| match language {
+                    Language::Chinese => format!("场景 CSV 数据集无效：{error}"),
+                    Language::English => format!("invalid CSV scenario dataset: {error}"),
+                })?
                 .clone();
             let mut rows = Vec::new();
             for record in reader.records() {
-                let record =
-                    record.map_err(|error| format!("invalid CSV scenario dataset: {error}"))?;
+                let record = record.map_err(|error| match language {
+                    Language::Chinese => format!("场景 CSV 数据集无效：{error}"),
+                    Language::English => format!("invalid CSV scenario dataset: {error}"),
+                })?;
                 rows.push(
                     headers
                         .iter()
@@ -389,19 +437,37 @@ pub(crate) fn load_scenario_datasets(
             }
             rows
         }
-        _ => return Err("scenario dataset must be a JSON or CSV file".into()),
+        _ => {
+            return Err(tr(
+                language,
+                "场景数据集必须是 JSON 或 CSV 文件",
+                "scenario dataset must be a JSON or CSV file",
+            )
+            .into());
+        }
     };
     if datasets.is_empty() {
-        return Err("scenario dataset contains no rows".into());
+        return Err(tr(
+            language,
+            "场景数据集没有数据行",
+            "scenario dataset contains no rows",
+        )
+        .into());
     }
     Ok(datasets)
 }
 
 pub(crate) fn json_dataset_row(
     value: serde_json::Value,
+    language: Language,
 ) -> Result<BTreeMap<String, String>, String> {
     let serde_json::Value::Object(row) = value else {
-        return Err("every JSON scenario dataset row must be an object".into());
+        return Err(tr(
+            language,
+            "场景 JSON 数据集的每一行必须是对象",
+            "every JSON scenario dataset row must be an object",
+        )
+        .into());
     };
     Ok(row
         .into_iter()
