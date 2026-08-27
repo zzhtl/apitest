@@ -137,6 +137,19 @@ impl ApiTestApp {
                     }
                     self.toast(ToastKind::Error, error);
                 }
+                StorageEvent::RunFinished {
+                    error,
+                    prune_failures,
+                } => {
+                    if let Some(error) = error {
+                        succeeded = false;
+                        self.toast(ToastKind::Error, error);
+                    }
+                    if prune_failures > 0 {
+                        tracing::warn!(prune_failures, "failed to delete expired response bodies");
+                    }
+                    self.reload_run_history();
+                }
             }
         }
         succeeded

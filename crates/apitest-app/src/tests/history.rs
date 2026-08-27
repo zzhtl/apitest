@@ -58,6 +58,9 @@ fn execution_history_externalizes_and_redacts_streamed_response_bodies() {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
+    // Persistence now happens on the storage worker; wait for it to commit
+    // the record and process the RunFinished acknowledgement.
+    assert!(harness.state_mut().wait_storage());
 
     let history = harness
         .state()

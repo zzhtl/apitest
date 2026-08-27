@@ -183,8 +183,13 @@ impl ApiTestApp {
                 return;
             }
         };
-        for definition in &definitions {
-            self.delete_request(*definition);
+        let deleted = self.delete_requests_batch(&definitions);
+        if deleted < definitions.len() {
+            // The batch already surfaced its error; leave the tree untouched
+            // so nothing silently half-disappears.
+            if !definitions.is_empty() && deleted == 0 {
+                return;
+            }
         }
         let parent = self
             .find_resource_node(node_id)
@@ -198,7 +203,14 @@ impl ApiTestApp {
         self.reload_resource_page(parent);
         self.toast(
             ToastKind::Success,
-            self.tr("文件夹已删除", "Folder deleted"),
+            match self.language {
+                crate::i18n::Language::Chinese => {
+                    format!("文件夹及 {} 个请求已删除", definitions.len())
+                }
+                crate::i18n::Language::English => {
+                    format!("Folder and {} requests deleted", definitions.len())
+                }
+            },
         );
     }
 

@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::StorageError;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageRequest {
@@ -99,7 +99,7 @@ impl Database {
     }
 
     fn initialize(&self) -> Result<(), StorageError> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
         connection.execute_batch(
             "PRAGMA foreign_keys = ON;
              PRAGMA journal_mode = WAL;
@@ -191,6 +191,28 @@ impl Database {
                  value TEXT NOT NULL
              );",
         )?;
+        let stored: Option<String> = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if stored.as_deref() != Some(&SCHEMA_VERSION.to_string()) {
+            // v3 keys the FTS rows by `definitions.rowid`, so deletes are a
+            // rowid lookup instead of a full index scan (`id` is UNINDEXED).
+            // Repopulating is idempotent and cheap relative to a migration.
+            let transaction = connection.transaction()?;
+            transaction.execute("DELETE FROM definitions_fts", [])?;
+            transaction.execute(
+                "INSERT INTO definitions_fts(rowid, id, project_id, name, description)
+                 SELECT rowid, id, project_id, name,
+                        COALESCE(json_extract(document, '$.description_markdown'), '')
+                 FROM definitions",
+                [],
+            )?;
+            transaction.commit()?;
+        }
         connection.execute(
             "INSERT INTO metadata(key, value) VALUES('schema_version', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -278,20 +300,7 @@ impl Database {
                 document
             ],
         )?;
-        transaction.execute(
-            "DELETE FROM definitions_fts WHERE id = ?1",
-            [definition.id.to_string()],
-        )?;
-        transaction.execute(
-            "INSERT INTO definitions_fts(id, project_id, name, description)
-             VALUES(?1, ?2, ?3, ?4)",
-            params![
-                definition.id.to_string(),
-                project_id.to_string(),
-                definition.name,
-                definition.description_markdown
-            ],
-        )?;
+        refresh_definition_fts(&transaction, project_id, definition)?;
         transaction.commit()?;
         Ok(())
     }
@@ -324,20 +333,7 @@ impl Database {
                 definition_document
             ],
         )?;
-        transaction.execute(
-            "DELETE FROM definitions_fts WHERE id = ?1",
-            [definition.id.to_string()],
-        )?;
-        transaction.execute(
-            "INSERT INTO definitions_fts(id, project_id, name, description)
-             VALUES(?1, ?2, ?3, ?4)",
-            params![
-                definition.id.to_string(),
-                project_id.to_string(),
-                definition.name,
-                definition.description_markdown
-            ],
-        )?;
+        refresh_definition_fts(&transaction, project_id, definition)?;
         transaction.execute(
             "INSERT INTO request_cases(id, project_id, definition_id, name, document)
              VALUES(?1, ?2, ?3, ?4, ?5)
@@ -406,7 +402,8 @@ impl Database {
             params![project_id.to_string(), id.to_string()],
         )?;
         transaction.execute(
-            "DELETE FROM definitions_fts WHERE project_id = ?1 AND id = ?2",
+            "DELETE FROM definitions_fts WHERE rowid =
+                 (SELECT rowid FROM definitions WHERE project_id = ?1 AND id = ?2)",
             params![project_id.to_string(), id.to_string()],
         )?;
         transaction.execute(
@@ -420,6 +417,58 @@ impl Database {
         )?;
         transaction.commit()?;
         Ok(deleted > 0)
+    }
+
+    /// `delete_definition` over many ids in one transaction: deleting a
+    /// folder of N requests used to run N transactions with a storage flush
+    /// between each.
+    pub fn delete_definitions(
+        &self,
+        project_id: EntityId,
+        ids: &[EntityId],
+    ) -> Result<usize, StorageError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let project_id = project_id.to_string();
+        let mut deleted = 0;
+        for id in ids {
+            let id = id.to_string();
+            transaction
+                .prepare_cached(
+                    "DELETE FROM project_nodes
+                     WHERE project_id = ?1 AND kind = 'request_case'
+                       AND entity_id IN (
+                           SELECT id FROM request_cases
+                           WHERE project_id = ?1 AND definition_id = ?2
+                       )",
+                )?
+                .execute(params![project_id, id])?;
+            transaction
+                .prepare_cached(
+                    "DELETE FROM request_cases WHERE project_id = ?1 AND definition_id = ?2",
+                )?
+                .execute(params![project_id, id])?;
+            transaction
+                .prepare_cached(
+                    "DELETE FROM definitions_fts WHERE rowid =
+                         (SELECT rowid FROM definitions WHERE project_id = ?1 AND id = ?2)",
+                )?
+                .execute(params![project_id, id])?;
+            transaction
+                .prepare_cached(
+                    "DELETE FROM project_nodes
+                     WHERE project_id = ?1 AND entity_id = ?2 AND kind = 'api_definition'",
+                )?
+                .execute(params![project_id, id])?;
+            deleted += transaction
+                .prepare_cached("DELETE FROM definitions WHERE project_id = ?1 AND id = ?2")?
+                .execute(params![project_id, id])?;
+        }
+        transaction.commit()?;
+        Ok(deleted)
     }
 
     /// Every definition beneath `folder`, at any depth.
@@ -552,7 +601,7 @@ impl Database {
             params![project_id.to_string(), definition_id.to_string()],
             |row| row.get::<_, i64>(0),
         )? as usize;
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare_cached(
             "SELECT document FROM request_cases
              WHERE project_id = ?1 AND definition_id = ?2
              ORDER BY name, id LIMIT ?3 OFFSET ?4",
@@ -570,6 +619,25 @@ impl Database {
             items: deserialize_rows(rows)?,
             total,
         })
+    }
+
+    /// The first request case of every definition in the project, in one
+    /// query. Loading a workspace used to issue one query per definition.
+    pub fn first_request_cases(
+        &self,
+        project_id: EntityId,
+    ) -> Result<Vec<RequestCase>, StorageError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare_cached(
+            "SELECT document FROM (
+                 SELECT document, ROW_NUMBER() OVER (
+                     PARTITION BY definition_id ORDER BY name, id
+                 ) AS row_index
+                 FROM request_cases WHERE project_id = ?1
+             ) WHERE row_index = 1",
+        )?;
+        let rows = statement.query_map([project_id.to_string()], |row| row.get::<_, String>(0))?;
+        deserialize_rows(rows)
     }
 
     pub fn save_project_node(&self, node: &ProjectNode) -> Result<(), StorageError> {
@@ -610,6 +678,22 @@ impl Database {
         upsert_definition_node(&connection, project_id, definition)
     }
 
+    /// `ensure_definition_node` for a whole workspace load, in one transaction
+    /// instead of one implicit commit per definition.
+    pub fn ensure_definition_nodes(
+        &self,
+        project_id: EntityId,
+        definitions: &[ApiDefinition],
+    ) -> Result<(), StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        for definition in definitions {
+            upsert_definition_node(&transaction, project_id, definition)?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn list_project_nodes(
         &self,
         project_id: EntityId,
@@ -626,7 +710,7 @@ impl Database {
             params![project_id, parent_id],
             |row| row.get::<_, i64>(0),
         )? as usize;
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare_cached(
             "SELECT document FROM project_nodes
              WHERE project_id = ?1
                AND ((?2 IS NULL AND parent_id IS NULL) OR parent_id = ?2)
@@ -694,7 +778,7 @@ impl Database {
     ) -> Result<(), StorageError> {
         let document = serde_json::to_string(record)?;
         let connection = self.connection()?;
-        connection.execute(
+        let mut statement = connection.prepare_cached(
             "INSERT INTO run_records(id, project_id, started_at, state, document)
              VALUES(?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
@@ -702,14 +786,14 @@ impl Database {
                  started_at = excluded.started_at,
                  state = excluded.state,
                  document = excluded.document",
-            params![
-                record.id.to_string(),
-                project_id.to_string(),
-                record.started_at.to_rfc3339(),
-                run_state_name(record.state),
-                document
-            ],
         )?;
+        statement.execute(params![
+            record.id.to_string(),
+            project_id.to_string(),
+            record.started_at.to_rfc3339(),
+            run_state_name(record.state),
+            document
+        ])?;
         Ok(())
     }
 
@@ -725,7 +809,7 @@ impl Database {
             [&project_id],
             |row| row.get::<_, i64>(0),
         )? as usize;
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare_cached(
             "SELECT document FROM run_records WHERE project_id = ?1
              ORDER BY started_at DESC, id DESC LIMIT ?2 OFFSET ?3",
         )?;
@@ -764,8 +848,10 @@ impl Database {
             .unwrap_or(now);
         let project_id = project_id.to_string();
         let body_paths = {
-            let mut statement = transaction.prepare(
-                "SELECT document FROM run_records
+            // Only the body path is needed; deserializing every pruned record
+            // just to read one field was pure waste.
+            let mut statement = transaction.prepare_cached(
+                "SELECT json_extract(document, '$.body_path') FROM run_records
                  WHERE project_id = ?1 AND (
                      started_at < ?2 OR id NOT IN (
                          SELECT id FROM run_records WHERE project_id = ?1
@@ -775,12 +861,15 @@ impl Database {
             )?;
             let rows = statement.query_map(
                 params![project_id, cutoff.to_rfc3339(), max_records as i64],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, Option<String>>(0),
             )?;
-            deserialize_rows::<RunRecord>(rows)?
-                .into_iter()
-                .filter_map(|record| record.body_path.map(PathBuf::from))
-                .collect::<Vec<_>>()
+            let mut paths = Vec::new();
+            for row in rows {
+                if let Some(path) = row? {
+                    paths.push(PathBuf::from(path));
+                }
+            }
+            paths
         };
         let mut deleted = transaction.execute(
             "DELETE FROM run_records WHERE project_id = ?1 AND started_at < ?2",
@@ -809,10 +898,10 @@ impl Database {
         }
         let search = fts_prefix_query(query);
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare_cached(
             "SELECT d.id, d.name, d.protocol
              FROM definitions_fts
-             JOIN definitions d ON d.id = definitions_fts.id
+             JOIN definitions d ON d.rowid = definitions_fts.rowid
              WHERE definitions_fts MATCH ?1
                AND definitions_fts.project_id = ?2
              ORDER BY rank
@@ -986,6 +1075,33 @@ fn upsert_definition_node(
             document
         ],
     )?;
+    Ok(())
+}
+
+/// Replace the FTS row for `definition`, keyed by the `definitions` rowid so
+/// the delete is a direct lookup. The definitions row must already exist.
+fn refresh_definition_fts(
+    connection: &Connection,
+    project_id: EntityId,
+    definition: &ApiDefinition,
+) -> Result<(), StorageError> {
+    connection
+        .prepare_cached(
+            "DELETE FROM definitions_fts WHERE rowid =
+                 (SELECT rowid FROM definitions WHERE id = ?1)",
+        )?
+        .execute([definition.id.to_string()])?;
+    connection
+        .prepare_cached(
+            "INSERT INTO definitions_fts(rowid, id, project_id, name, description)
+             SELECT rowid, ?1, ?2, ?3, ?4 FROM definitions WHERE id = ?1",
+        )?
+        .execute(params![
+            definition.id.to_string(),
+            project_id.to_string(),
+            definition.name,
+            definition.description_markdown
+        ])?;
     Ok(())
 }
 

@@ -106,22 +106,29 @@ pub(crate) fn load_project_content(
             }
         })
         .unwrap_or_default();
+    if let Some(database) = database
+        && !definitions.is_empty()
+        && let Err(error) = database.ensure_definition_nodes(project.id, &definitions)
+    {
+        errors.push(error.to_string());
+    }
+    // One window-function query for every definition's first case, instead of
+    // one query per definition.
+    let mut first_cases = database
+        .map(|database| match database.first_request_cases(project.id) {
+            Ok(cases) => cases
+                .into_iter()
+                .map(|case| (case.definition_id, case))
+                .collect::<HashMap<_, _>>(),
+            Err(error) => {
+                errors.push(error.to_string());
+                HashMap::new()
+            }
+        })
+        .unwrap_or_default();
     let mut requests = Vec::with_capacity(definitions.len());
     for definition in definitions {
-        if let Some(database) = database
-            && let Err(error) = database.ensure_definition_node(project.id, &definition)
-        {
-            errors.push(error.to_string());
-        }
-        let request_case = database.and_then(|database| {
-            match database.list_request_cases(project.id, definition.id, PageRequest::new(0, 1)) {
-                Ok(page) => page.items.into_iter().next(),
-                Err(error) => {
-                    errors.push(error.to_string());
-                    None
-                }
-            }
-        });
+        let request_case = first_cases.remove(&definition.id);
         requests.push(WorkspaceRequest::from_definition(definition, request_case));
     }
     if requests.is_empty() {

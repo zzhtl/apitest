@@ -228,7 +228,7 @@ impl ApiTestApp {
         let (sender, receiver) = mpsc::channel();
         let storage_worker = database
             .as_ref()
-            .map(|database| StorageWorker::new(Arc::clone(database)));
+            .map(|database| StorageWorker::new(Arc::clone(database), body_store.clone()));
         resource_pages.entry(None).or_default();
         let document_tabs = load_document_tabs(
             database.as_deref(),

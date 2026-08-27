@@ -269,45 +269,70 @@ impl ApiTestApp {
     }
 
     pub(crate) fn delete_request(&mut self, id: EntityId) {
-        if !self.requests.iter().any(|request| request.id() == id) {
-            return;
+        if self.delete_requests_batch(&[id]) > 0 {
+            self.toast(ToastKind::Success, self.tr("请求已删除", "Request deleted"));
+        }
+    }
+
+    /// Delete several requests with one storage transaction, one flush and one
+    /// in-memory cleanup pass, and no per-item toasts. Returns how many
+    /// requests the database dropped; the caller reports the outcome.
+    ///
+    /// Deleting a folder used to call the single-request path in a loop: a
+    /// 200-request folder meant 200 blocking storage round-trips and 200
+    /// stacked toasts.
+    pub(crate) fn delete_requests_batch(&mut self, ids: &[EntityId]) -> usize {
+        if ids.is_empty() {
+            return 0;
         }
         let Some(database) = self.database.clone() else {
             self.toast(
                 ToastKind::Error,
                 self.tr("本地数据库不可用", "Local database unavailable"),
             );
-            return;
+            return 0;
         };
         if !self.wait_storage() {
-            return;
+            return 0;
         }
-        if let Err(error) = database.delete_definition(self.project.id, id) {
-            self.toast(ToastKind::Error, error.to_string());
-            return;
-        }
-        let _ = self.drain_storage();
-        let Some(index) = self.requests.iter().position(|request| request.id() == id) else {
-            return;
+        let deleted = match database.delete_definitions(self.project.id, ids) {
+            Ok(deleted) => deleted,
+            Err(error) => {
+                self.toast(ToastKind::Error, error.to_string());
+                return 0;
+            }
         };
-        let mut references = AuthDraft::references_for_request(id);
-        references.extend(
-            self.requests[index]
-                .request_case
-                .local_variables
-                .iter()
-                .filter_map(|variable| variable.secret_ref.clone()),
-        );
-        self.cleanup_secret_references(references);
+        let _ = self.drain_storage();
+        let removing = ids.iter().copied().collect::<HashSet<_>>();
+        for id in &removing {
+            let Some(index) = self.requests.iter().position(|request| request.id() == *id) else {
+                continue;
+            };
+            let mut references = AuthDraft::references_for_request(*id);
+            references.extend(
+                self.requests[index]
+                    .request_case
+                    .local_variables
+                    .iter()
+                    .filter_map(|variable| variable.secret_ref.clone()),
+            );
+            self.cleanup_secret_references(references);
+            self.requests.remove(index);
+            self.sessions.close(DocumentId {
+                kind: DocumentKind::Api,
+                entity_id: *id,
+            });
+        }
+        self.document_tabs
+            .retain(|doc| !(doc.kind == DocumentKind::Api && removing.contains(&doc.entity_id)));
+        self.persist_document_tabs();
+        if let Some(active) = self.document_tabs.active() {
+            self.activate_document(active);
+        }
         self.invalidate_scenario_run();
-        self.requests.remove(index);
         self.selected = self.selected.min(self.requests.len().saturating_sub(1));
-        self.close_document(DocumentId {
-            kind: DocumentKind::Api,
-            entity_id: id,
-        });
         self.reload_resource_page(None);
-        self.toast(ToastKind::Success, self.tr("请求已删除", "Request deleted"));
+        deleted
     }
 
     pub(crate) fn delete_environment(&mut self, id: EntityId) {

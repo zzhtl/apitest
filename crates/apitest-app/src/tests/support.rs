@@ -203,7 +203,7 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         executors.register(kind, Arc::clone(&fake));
     }
     let (sender, receiver) = mpsc::channel();
-    let storage_worker = StorageWorker::new(Arc::clone(&database));
+    let storage_worker = StorageWorker::new(Arc::clone(&database), None);
     let mut document_tabs = DocumentTabs::default();
     document_tabs.open(
         DocumentId {

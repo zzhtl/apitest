@@ -51,7 +51,7 @@ fn schema_v2_persists_cases_and_pages_project_nodes() {
         .list_project_nodes(project.id, None, PageRequest::new(0, 2))
         .expect("nodes should load");
 
-    assert_eq!(database.schema_version().expect("version should load"), 2);
+    assert_eq!(database.schema_version().expect("version should load"), 3);
     assert_eq!(cases.total, 1);
     assert_eq!(cases.items, vec![request_case]);
     assert_eq!(nodes.total, 3);

@@ -7,8 +7,8 @@ use std::{
 #[cfg(test)]
 use std::time::Duration;
 
-use apitest_core::{ApiDefinition, EntityId, Environment, RequestCase};
-use apitest_storage::{Database, StorageError};
+use apitest_core::{ApiDefinition, EntityId, Environment, RequestCase, RunRecord};
+use apitest_storage::{BodyRef, BodyStore, Database, RedactingBodySink, StorageError};
 use chrono::Utc;
 use thiserror::Error;
 
@@ -60,6 +60,13 @@ enum StorageCommand {
         project_id: EntityId,
         requests: Vec<(ApiDefinition, RequestCase, u64)>,
     },
+    FinishRun {
+        project_id: EntityId,
+        record: RunRecord,
+        sink: Option<RedactingBodySink>,
+        max_records: usize,
+        max_age_days: i64,
+    },
     Flush {
         acknowledged: mpsc::Sender<()>,
     },
@@ -85,6 +92,12 @@ pub(crate) enum StorageEvent {
         entity_id: EntityId,
         error: String,
     },
+    /// A run record (and its body file) was committed; the history list
+    /// should reload.
+    RunFinished {
+        error: Option<String>,
+        prune_failures: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -102,7 +115,7 @@ pub(crate) struct StorageWorker {
 }
 
 impl StorageWorker {
-    pub fn new(database: Arc<Database>) -> Self {
+    pub fn new(database: Arc<Database>, body_store: Option<BodyStore>) -> Self {
         let (command_sender, command_receiver) = mpsc::sync_channel(64);
         let (event_sender, events) = mpsc::channel();
         let task = thread::Builder::new()
@@ -187,6 +200,70 @@ impl StorageWorker {
                                 }
                             }
                         }
+                        StorageCommand::FinishRun {
+                            project_id,
+                            mut record,
+                            sink,
+                            max_records,
+                            max_age_days,
+                        } => {
+                            let mut failure = None;
+                            let body = sink.and_then(|sink| match sink.commit() {
+                                Ok(body) => Some(body),
+                                Err(error) => {
+                                    failure = Some(error.to_string());
+                                    None
+                                }
+                            });
+                            if record.response_bytes == 0 {
+                                record.response_bytes =
+                                    body.as_ref().map(|body| body.size).unwrap_or_default();
+                            }
+                            record.body_path =
+                                body.as_ref().map(|body| body.path.display().to_string());
+                            let mut prune_failures = 0;
+                            match database.save_run_record(project_id, &record) {
+                                Ok(()) => {
+                                    match database.prune_run_records_with_body_paths(
+                                        project_id,
+                                        max_records,
+                                        max_age_days,
+                                        Utc::now(),
+                                    ) {
+                                        Ok((_, paths)) => {
+                                            if let Some(store) = &body_store {
+                                                for path in paths {
+                                                    if store
+                                                        .delete(&BodyRef { path, size: 0 })
+                                                        .is_err()
+                                                    {
+                                                        prune_failures += 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(error) => {
+                                            failure.get_or_insert_with(|| error.to_string());
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    // The record never landed; its body file
+                                    // must not leak.
+                                    if let (Some(store), Some(body)) = (&body_store, &body) {
+                                        let _ = store.delete(body);
+                                    }
+                                    failure = Some(error.to_string());
+                                }
+                            }
+                            let event = StorageEvent::RunFinished {
+                                error: failure,
+                                prune_failures,
+                            };
+                            if event_sender.send(event).is_err() {
+                                break;
+                            }
+                        }
                         StorageCommand::Flush { acknowledged } => {
                             let _ = acknowledged.send(());
                         }
@@ -265,6 +342,31 @@ impl StorageWorker {
                 mpsc::TrySendError::Full(_) => StorageQueueError::Full,
                 mpsc::TrySendError::Disconnected(_) => StorageQueueError::Closed,
             })
+    }
+
+    /// Queue end-of-run persistence: body commit, record save and pruning.
+    ///
+    /// Blocking `send` rather than `try_send`: a full queue must delay the
+    /// completion slightly, never drop a run from history.
+    pub fn queue_finish_run(
+        &self,
+        project_id: EntityId,
+        record: RunRecord,
+        sink: Option<RedactingBodySink>,
+        max_records: usize,
+        max_age_days: i64,
+    ) -> Result<(), StorageQueueError> {
+        self.commands
+            .as_ref()
+            .ok_or(StorageQueueError::Closed)?
+            .send(StorageCommand::FinishRun {
+                project_id,
+                record,
+                sink,
+                max_records,
+                max_age_days,
+            })
+            .map_err(|_| StorageQueueError::Closed)
     }
 
     pub fn try_recv(&self) -> Option<StorageEvent> {
@@ -350,7 +452,7 @@ mod tests {
         database
             .save_definition(project.id, &definition)
             .expect("definition should save");
-        let worker = StorageWorker::new(Arc::clone(&database));
+        let worker = StorageWorker::new(Arc::clone(&database), None);
 
         worker
             .queue_request(
@@ -395,7 +497,7 @@ mod tests {
         database
             .save_project(&project)
             .expect("project should save");
-        let worker = StorageWorker::new(Arc::clone(&database));
+        let worker = StorageWorker::new(Arc::clone(&database), None);
 
         worker
             .queue_environment(project.id, environment.clone(), 3, false)
@@ -440,7 +542,7 @@ mod tests {
                 (definition, request_case, index + 1)
             })
             .collect::<Vec<_>>();
-        let worker = StorageWorker::new(Arc::clone(&database));
+        let worker = StorageWorker::new(Arc::clone(&database), None);
 
         worker
             .queue_import(project.id, requests)
@@ -482,7 +584,7 @@ mod tests {
         database
             .save_project(&project)
             .expect("project should save");
-        let worker = StorageWorker::new(Arc::clone(&database));
+        let worker = StorageWorker::new(Arc::clone(&database), None);
 
         worker
             .queue_request(project.id, definition.clone(), request_case, 1, false)

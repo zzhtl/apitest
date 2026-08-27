@@ -130,3 +130,76 @@ fn deletes_environments_without_affecting_the_project() {
         vec![project]
     );
 }
+
+#[test]
+fn reopening_an_older_database_rebuilds_the_search_index_keyed_by_rowid() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let path = temp.path().join("apitest-v2.sqlite3");
+    let project = Project::new("Petstore");
+    let definition = ApiDefinition::new(
+        "List users",
+        ProtocolSpec::Http(HttpSpec::new(HttpMethod::Get, "/users")),
+    );
+    {
+        let database = Database::open(&path).expect("database should open");
+        database
+            .save_project(&project)
+            .expect("project should save");
+        database
+            .save_definition(project.id, &definition)
+            .expect("definition should save");
+    }
+    {
+        // Fake the v2 on-disk state: version 2, FTS rows not aligned with the
+        // definitions rowids.
+        let connection = rusqlite::Connection::open(&path).expect("raw connection should open");
+        connection
+            .execute(
+                "UPDATE metadata SET value = '2' WHERE key = 'schema_version'",
+                [],
+            )
+            .expect("version should downgrade");
+        connection
+            .execute("DELETE FROM definitions_fts", [])
+            .expect("index should clear");
+        connection
+            .execute(
+                "INSERT INTO definitions_fts(rowid, id, project_id, name, description)
+                 VALUES(999, ?1, ?2, ?3, '')",
+                rusqlite::params![
+                    definition.id.to_string(),
+                    project.id.to_string(),
+                    definition.name
+                ],
+            )
+            .expect("stale index row should insert");
+    }
+
+    let database = Database::open(&path).expect("database should reopen");
+    assert_eq!(
+        database.schema_version().expect("version should read"),
+        3,
+        "reopening must migrate to the rowid-keyed index"
+    );
+    let hits = database
+        .search_definitions(project.id, "users", 10)
+        .expect("search should work after migration");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, definition.id);
+
+    // The rowid keying must survive a save + delete roundtrip.
+    database
+        .save_definition(project.id, &definition)
+        .expect("definition should re-save");
+    assert!(
+        database
+            .delete_definition(project.id, definition.id)
+            .expect("definition should delete")
+    );
+    assert!(
+        database
+            .search_definitions(project.id, "users", 10)
+            .expect("search should still work")
+            .is_empty()
+    );
+}

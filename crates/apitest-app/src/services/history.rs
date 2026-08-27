@@ -10,6 +10,7 @@ use crate::i18n::Language;
 use crate::services::secrets::sensitive_name;
 use crate::state::action::ToastKind;
 use crate::state::response::MAX_RESPONSE_BYTES;
+use crate::state::workspace::Navigation;
 use crate::ui::text_view::split_display_rows;
 use crate::workbench::DocumentId;
 
@@ -151,16 +152,7 @@ impl ApiTestApp {
             session.history_body = None;
             return;
         };
-        let body = match session.history_body.take() {
-            Some(sink) => match sink.commit() {
-                Ok(body) => Some(body),
-                Err(storage_error) => {
-                    self.toast(ToastKind::Error, storage_error.to_string());
-                    None
-                }
-            },
-            None => None,
-        };
+        let sink = session.history_body.take();
         let finished_at = Utc::now();
         record.state = state;
         record.status_code = status_code;
@@ -169,43 +161,27 @@ impl ApiTestApp {
             .unwrap_or_else(|| (finished_at - record.started_at).num_milliseconds().max(0) as u64);
         record.response_bytes = metrics
             .map(|metrics| metrics.received_bytes)
-            .or_else(|| body.as_ref().map(|body| body.size))
             .unwrap_or_default();
-        record.body_path = body.as_ref().map(|body| body.path.display().to_string());
         record.error = error.map(|error| redact_text(&error, &redactions));
         record.finished_at = Some(finished_at);
 
-        let Some(database) = self.database.clone() else {
-            if let (Some(store), Some(body)) = (&self.body_store, body.as_ref()) {
-                let _ = store.delete(body);
-            }
+        // Commit + save + prune moved off the UI thread: the worker fills in
+        // `body_path`/`response_bytes` from the committed sink and answers
+        // with `RunFinished`, which reloads the visible history.
+        let Some(worker) = &self.storage_worker else {
+            // No database: dropping the uncommitted sink removes its file.
+            drop(sink);
             return;
         };
-        if let Err(storage_error) = database.save_run_record(self.project.id, &record) {
-            if let (Some(store), Some(body)) = (&self.body_store, body.as_ref()) {
-                let _ = store.delete(body);
-            }
-            self.toast(ToastKind::Error, storage_error.to_string());
-            return;
-        }
-        match database.prune_run_records_with_body_paths(
+        if let Err(queue_error) = worker.queue_finish_run(
             self.project.id,
+            record,
+            sink,
             HISTORY_MAX_RECORDS,
             HISTORY_MAX_AGE_DAYS,
-            finished_at,
         ) {
-            Ok((_, paths)) => {
-                if let Some(store) = &self.body_store {
-                    for path in paths {
-                        if let Err(storage_error) = store.delete(&BodyRef { path, size: 0 }) {
-                            tracing::warn!(%storage_error, "failed to delete expired response body");
-                        }
-                    }
-                }
-            }
-            Err(storage_error) => self.toast(ToastKind::Error, storage_error.to_string()),
+            self.toast(ToastKind::Error, queue_error.to_string());
         }
-        self.reload_run_history();
     }
 
     pub(crate) fn reload_run_history(&mut self) {
@@ -226,7 +202,10 @@ impl ApiTestApp {
                 self.selected_history = selected_id
                     .and_then(|id| self.run_records.iter().position(|record| record.id == id))
                     .unwrap_or_default();
-                self.load_selected_history_body();
+                // The preview can be 10 MiB; only read it while it is visible.
+                if self.navigation == Navigation::History {
+                    self.load_selected_history_body();
+                }
             }
             Err(error) => self.toast(ToastKind::Error, error.to_string()),
         }
