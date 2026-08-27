@@ -5,7 +5,7 @@ mod collection;
 mod openapi;
 mod portable;
 
-pub use codegen::{CodeLanguage, generate_code};
+pub use codegen::{CodeLanguage, generate_code, generate_grpc_code, generate_websocket_code};
 pub use collection::{
     IMPORTED_AUTH_MARKER, export_curl, export_har, export_postman, import_curl, import_har,
     import_postman,

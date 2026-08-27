@@ -18,6 +18,15 @@ pub(crate) const HISTORY_MAX_RECORDS: usize = 200;
 
 pub(crate) const HISTORY_MAX_AGE_DAYS: i64 = 30;
 
+pub(crate) const HISTORY_MAX_RECORDS_SETTING: &str = "history.max_records";
+
+pub(crate) const HISTORY_MAX_AGE_DAYS_SETTING: &str = "history.max_age_days";
+
+/// Bounds for the configurable retention, enforced on load and in the UI.
+pub(crate) const HISTORY_RECORDS_RANGE: std::ops::RangeInclusive<usize> = 10..=1000;
+
+pub(crate) const HISTORY_AGE_RANGE: std::ops::RangeInclusive<i64> = 1..=365;
+
 impl ApiTestApp {
     pub(crate) fn history_redaction_values(
         &self,
@@ -177,8 +186,8 @@ impl ApiTestApp {
             self.project.id,
             record,
             sink,
-            HISTORY_MAX_RECORDS,
-            HISTORY_MAX_AGE_DAYS,
+            self.history_max_records,
+            self.history_max_age_days,
         ) {
             self.toast(ToastKind::Error, queue_error.to_string());
         }
@@ -196,7 +205,10 @@ impl ApiTestApp {
             .run_records
             .get(self.selected_history)
             .map(|record| record.id);
-        match database.list_run_records(self.project.id, PageRequest::new(0, HISTORY_MAX_RECORDS)) {
+        match database.list_run_records(
+            self.project.id,
+            PageRequest::new(0, self.history_max_records),
+        ) {
             Ok(page) => {
                 self.run_records = page.items;
                 self.selected_history = selected_id

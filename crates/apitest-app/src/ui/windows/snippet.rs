@@ -1,5 +1,5 @@
-use apitest_core::ProtocolSpec;
-use apitest_interop::{CodeLanguage, generate_code};
+use apitest_core::{ProtocolKind, ProtocolSpec};
+use apitest_interop::{CodeLanguage, generate_code, generate_grpc_code, generate_websocket_code};
 use eframe::egui::{self, RichText};
 
 use crate::app::{ApiTestApp, SnippetCache};
@@ -22,6 +22,23 @@ const LANGUAGES: &[(CodeLanguage, &str, &str)] = &[
     (CodeLanguage::RustReqwest, "Rust reqwest", "request.rs"),
 ];
 
+const WEBSOCKET_LANGUAGES: &[(CodeLanguage, &str, &str)] = &[
+    (CodeLanguage::Curl, "websocat", "session.sh"),
+    (CodeLanguage::JavaScriptFetch, "JavaScript", "session.js"),
+];
+
+const GRPC_LANGUAGES: &[(CodeLanguage, &str, &str)] =
+    &[(CodeLanguage::Curl, "grpcurl", "request.sh")];
+
+/// The snippet targets that make sense for `kind`.
+fn languages_for(kind: ProtocolKind) -> &'static [(CodeLanguage, &'static str, &'static str)] {
+    match kind {
+        ProtocolKind::WebSocket => WEBSOCKET_LANGUAGES,
+        ProtocolKind::Grpc => GRPC_LANGUAGES,
+        _ => LANGUAGES,
+    }
+}
+
 impl ApiTestApp {
     /// The snippet for the selected request, or why one cannot be produced.
     ///
@@ -31,21 +48,40 @@ impl ApiTestApp {
         let Some(request) = self.requests.get(self.selected) else {
             return Err(self.tr("没有可生成的请求", "No request selected").into());
         };
+        let unsupported = |kind: ProtocolKind| match self.language {
+            crate::i18n::Language::Chinese => {
+                format!("{kind:?} 协议暂不支持生成代码片段")
+            }
+            crate::i18n::Language::English => {
+                format!("Code snippets are not available for {kind:?}")
+            }
+        };
         match request.edited_protocol() {
             ProtocolSpec::Http(spec) => Ok(generate_code(&spec, self.snippet_language)),
-            other => Err(match self.language {
-                crate::i18n::Language::Chinese => {
-                    format!("{:?} 协议暂不支持生成代码片段", other.kind())
-                }
-                crate::i18n::Language::English => {
-                    format!("Code snippets are not available for {:?}", other.kind())
-                }
-            }),
+            ProtocolSpec::WebSocket(spec) => generate_websocket_code(&spec, self.snippet_language)
+                .ok_or_else(|| unsupported(ProtocolKind::WebSocket)),
+            ProtocolSpec::Grpc(spec) => generate_grpc_code(&spec, self.snippet_language)
+                .ok_or_else(|| unsupported(ProtocolKind::Grpc)),
+            other => Err(unsupported(other.kind())),
         }
     }
 
     pub(crate) fn snippet_window(&mut self, context: &egui::Context) {
         let mut open = self.show_snippet;
+        let languages = languages_for(
+            self.requests
+                .get(self.selected)
+                .map(|request| request.protocol_kind())
+                .unwrap_or(ProtocolKind::Http),
+        );
+        // Switching protocols can leave a target the new protocol lacks.
+        if !languages
+            .iter()
+            .any(|(language, _, _)| *language == self.snippet_language)
+            && let Some((language, _, _)) = languages.first()
+        {
+            self.snippet_language = *language;
+        }
         // Regenerate only when the request, language or edit revision moved;
         // the revision advances via the edit sweep, at most every 250 ms.
         let key = self.requests.get(self.selected).map(|request| {
@@ -82,7 +118,7 @@ impl ApiTestApp {
             .default_size([720.0, 520.0])
             .show(context, |ui| {
                 ui.horizontal(|ui| {
-                    for (language, label, _) in LANGUAGES {
+                    for (language, label, _) in languages {
                         ui.selectable_value(&mut selected, *language, *label);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -121,7 +157,7 @@ impl ApiTestApp {
             self.toast(ToastKind::Success, self.tr("已复制", "Copied"));
         }
         if let Some(code) = export {
-            let file_name = LANGUAGES
+            let file_name = languages
                 .iter()
                 .find(|(language, _, _)| *language == selected)
                 .map(|(_, _, file_name)| *file_name)

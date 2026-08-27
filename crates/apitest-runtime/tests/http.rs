@@ -532,3 +532,175 @@ async fn timeout_error_reports_the_configured_duration() {
             .any(|event| matches!(event, Err(ExecutionError::Timeout { timeout_ms: 20 })))
     );
 }
+
+#[tokio::test]
+async fn sse_reconnects_after_the_server_closes_and_resumes_from_the_last_event_id() {
+    // Each connection serves one event then ends; the executor must dial
+    // again with `Last-Event-ID` when reconnect is enabled.
+    let seen_ids = Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
+    let handler_ids = Arc::clone(&seen_ids);
+    let app = Router::new().route(
+        "/events",
+        get(move |headers: axum::http::HeaderMap| {
+            let seen_ids = Arc::clone(&handler_ids);
+            async move {
+                let last = headers
+                    .get("last-event-id")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned);
+                let attempt = {
+                    let mut seen = seen_ids.lock().expect("id log should lock");
+                    seen.push(last);
+                    seen.len()
+                };
+                let payload = if attempt == 1 {
+                    "id: 1\ndata: first\n\n"
+                } else {
+                    "id: 2\ndata: second\n\n"
+                };
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    payload.to_owned(),
+                )
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("test server should run");
+    });
+
+    let executor = HttpExecutor::new(Arc::new(MemorySecretStore::default()));
+    let spec = SseSpec {
+        request: HttpSpec::new(HttpMethod::Get, format!("http://{address}/events")),
+        reconnect: true,
+    };
+    let cancellation = CancellationToken::new();
+    let mut stream = executor.execute(
+        ExecutionRequest::new(ProtocolSpec::Sse(spec), Environment::new("test")),
+        cancellation.clone(),
+    );
+
+    let mut messages = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let event = tokio::time::timeout_at(deadline, stream.next())
+            .await
+            .expect("reconnect should deliver the second event in time");
+        match event {
+            Some(Ok(ExecutionEvent::Message { data, .. })) => {
+                messages.push(String::from_utf8_lossy(&data).into_owned());
+                if messages.len() == 2 {
+                    cancellation.cancel();
+                }
+            }
+            Some(Ok(_)) => {}
+            Some(Err(ExecutionError::Cancelled)) | None => break,
+            Some(Err(error)) => panic!("unexpected SSE error: {error}"),
+        }
+    }
+
+    assert_eq!(messages, ["first", "second"]);
+    let seen = seen_ids.lock().expect("id log should lock");
+    assert!(seen.len() >= 2, "server should have seen a reconnect");
+    assert_eq!(seen[0], None);
+    assert_eq!(seen[1].as_deref(), Some("1"));
+}
+
+#[tokio::test]
+async fn oauth_tokens_are_cached_and_refreshed_instead_of_reacquired() {
+    let grants = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let handler_grants = Arc::clone(&grants);
+    async fn authorization(request: axum::extract::Request) -> Json<Value> {
+        let authorization = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        Json(json!({"authorization": authorization}))
+    }
+    let app = Router::new()
+        .route(
+            "/token",
+            post(
+                move |axum::extract::Form(form): axum::extract::Form<
+                    std::collections::HashMap<String, String>,
+                >| {
+                    let grants = Arc::clone(&handler_grants);
+                    async move {
+                        let grant = form.get("grant_type").cloned().unwrap_or_default();
+                        grants
+                            .lock()
+                            .expect("grant log should lock")
+                            .push(grant.clone());
+                        let token = if grant == "refresh_token" {
+                            "refreshed-token"
+                        } else {
+                            "initial-token"
+                        };
+                        // 60 s safety margin leaves a 1 s cached lifetime.
+                        Json(json!({
+                            "access_token": token,
+                            "token_type": "Bearer",
+                            "expires_in": 61,
+                            "refresh_token": "refresh-1",
+                        }))
+                    }
+                },
+            ),
+        )
+        .route("/inspect", any(authorization));
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("test server should run");
+    });
+
+    let executor = HttpExecutor::new(Arc::new(MemorySecretStore::default()));
+    let spec = || {
+        let mut spec = HttpSpec::new(HttpMethod::Get, format!("http://{address}/inspect"));
+        spec.auth = AuthSpec::OAuth2 {
+            grant: OAuth2Grant::ClientCredentials,
+            authorization_url: None,
+            token_url: format!("http://{address}/token"),
+            client_id: "apitest-client".into(),
+            client_secret: None,
+            scopes: vec!["users:read".into()],
+            username: None,
+            password: None,
+            access_token: None,
+        };
+        spec
+    };
+
+    let first = execute_json(&executor, spec()).await;
+    assert_eq!(first["authorization"], "Bearer initial-token");
+    let second = execute_json(&executor, spec()).await;
+    assert_eq!(
+        second["authorization"], "Bearer initial-token",
+        "the cached token must be reused without a new token request",
+    );
+    assert_eq!(
+        grants.lock().expect("grant log should lock").as_slice(),
+        ["client_credentials"],
+    );
+
+    // Let the cached token expire; renewal must go through the refresh grant.
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    let third = execute_json(&executor, spec()).await;
+    assert_eq!(third["authorization"], "Bearer refreshed-token");
+    assert_eq!(
+        grants.lock().expect("grant log should lock").as_slice(),
+        ["client_credentials", "refresh_token"],
+    );
+}

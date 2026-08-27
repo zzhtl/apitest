@@ -291,6 +291,9 @@ impl ApiTestApp {
                 }
                 RuntimeMessage::Verified(run, outcome) => self.apply_verification(run, *outcome),
                 RuntimeMessage::Closed(run) => {
+                    // The response may have carried Set-Cookie headers; let
+                    // the debounced jar save pick them up.
+                    self.cookies_dirty = true;
                     let Some(document) = self.sessions.owner(run) else {
                         continue;
                     };

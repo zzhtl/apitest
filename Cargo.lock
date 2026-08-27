@@ -290,6 +290,8 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
+ "cookie",
+ "cookie_store",
  "eventsource-stream",
  "futures",
  "hmac",

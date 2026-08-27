@@ -134,11 +134,19 @@ pub(crate) fn auth_editor(
                             "Client Credentials",
                         );
                         ui.selectable_value(grant, OAuth2Grant::Password, "Password");
-                        ui.selectable_value(
-                            grant,
-                            OAuth2Grant::AuthorizationCodePkce,
-                            "Authorization Code + PKCE",
-                        );
+                        // Selectable only when already stored (imports, old
+                        // documents), so the user can switch away; otherwise a
+                        // mode that always fails at send time stays disabled.
+                        let pkce_stored = *grant == OAuth2Grant::AuthorizationCodePkce;
+                        ui.add_enabled(
+                            pkce_stored,
+                            egui::Button::selectable(pkce_stored, "Authorization Code + PKCE"),
+                        )
+                        .on_disabled_hover_text(tr(
+                            language,
+                            "需要交互式登录，暂未支持；可改用已缓存的 Access Token",
+                            "Needs an interactive login, not supported yet; use a cached access token instead",
+                        ));
                     });
             });
             if *grant == OAuth2Grant::AuthorizationCodePkce {

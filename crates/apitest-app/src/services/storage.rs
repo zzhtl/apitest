@@ -1,13 +1,90 @@
-use std::{collections::HashSet, time::Instant};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 use apitest_core::SecretRef;
 
 use crate::app::ApiTestApp;
+use apitest_storage::BackupManager;
+
 use crate::persistence::{StorageEvent, StorageWorker};
 use crate::state::action::ToastKind;
 use crate::workbench::{DocumentId, DocumentKind};
 
+/// Minimum pause between cookie-jar saves; runs finishing back-to-back
+/// coalesce into one write.
+const COOKIE_SAVE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How often the database file is snapshotted while the app runs.
+const BACKUP_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
+/// How many rolling snapshots are kept.
+const BACKUP_RETENTION: usize = 5;
+
 impl ApiTestApp {
+    /// Queue a rolling backup once at startup and every [`BACKUP_INTERVAL`].
+    ///
+    /// Runs on the storage worker from the file path, so nothing blocks the
+    /// app's own connection while pages are copied.
+    pub(crate) fn schedule_backups(&mut self) {
+        if self
+            .last_backup
+            .is_some_and(|last| last.elapsed() < BACKUP_INTERVAL)
+        {
+            return;
+        }
+        let Some(worker) = &self.storage_worker else {
+            return;
+        };
+        let Some(source) = self
+            .database
+            .as_deref()
+            .and_then(|database| database.path())
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        let Some(directory) = source.parent().map(|parent| parent.join("backups")) else {
+            return;
+        };
+        self.last_backup = Some(Instant::now());
+        match BackupManager::new(directory, BACKUP_RETENTION) {
+            Ok(manager) => {
+                if let Err(error) = worker.queue_backup(manager, source) {
+                    tracing::warn!(%error, "failed to queue a rolling backup");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "failed to prepare the backup directory"),
+        }
+    }
+
+    pub(crate) fn save_cookie_jar_if_due(&mut self) {
+        if !self.cookies_dirty {
+            return;
+        }
+        if self
+            .last_cookie_save
+            .is_some_and(|last| last.elapsed() < COOKIE_SAVE_INTERVAL)
+        {
+            return;
+        }
+        self.save_cookie_jar();
+    }
+
+    /// Persist the jar's non-session cookies into settings.
+    pub(crate) fn save_cookie_jar(&mut self) {
+        if !self.cookies_dirty {
+            return;
+        }
+        let Some(json) = self.cookie_jar.to_json() else {
+            return;
+        };
+        self.cookies_dirty = false;
+        self.last_cookie_save = Some(Instant::now());
+        self.persist_setting(crate::app::COOKIE_JAR_SETTING, &json);
+    }
+
     pub(crate) fn drain_storage(&mut self) -> bool {
         self.drain_storage_protected(&HashSet::new())
     }

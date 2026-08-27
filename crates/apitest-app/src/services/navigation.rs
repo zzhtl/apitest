@@ -7,7 +7,6 @@ use crate::app::{ACTIVE_PROJECT_SETTING, ApiTestApp};
 use crate::environment::EnvironmentDraft;
 use crate::i18n::Language;
 use crate::services::document::document_snapshot;
-use crate::services::history::HISTORY_MAX_RECORDS;
 use crate::services::loader::{
     RESOURCE_PAGE_SIZE, active_environment_setting, load_automation, load_document_tabs,
     load_project_content, load_setting,
@@ -311,7 +310,7 @@ impl ApiTestApp {
             .database
             .as_deref()
             .map(|database| {
-                database.list_run_records(project.id, PageRequest::new(0, HISTORY_MAX_RECORDS))
+                database.list_run_records(project.id, PageRequest::new(0, self.history_max_records))
             })
             .transpose();
         let run_records = match run_records {

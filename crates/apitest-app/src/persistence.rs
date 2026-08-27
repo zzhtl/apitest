@@ -8,7 +8,9 @@ use std::{
 use std::time::Duration;
 
 use apitest_core::{ApiDefinition, EntityId, Environment, RequestCase, RunRecord};
-use apitest_storage::{BodyRef, BodyStore, Database, RedactingBodySink, StorageError};
+use apitest_storage::{
+    BackupManager, BodyRef, BodyStore, Database, RedactingBodySink, StorageError,
+};
 use chrono::Utc;
 use thiserror::Error;
 
@@ -66,6 +68,10 @@ enum StorageCommand {
         sink: Option<RedactingBodySink>,
         max_records: usize,
         max_age_days: i64,
+    },
+    Backup {
+        manager: BackupManager,
+        source: PathBuf,
     },
     Flush {
         acknowledged: mpsc::Sender<()>,
@@ -264,6 +270,18 @@ impl StorageWorker {
                                 break;
                             }
                         }
+                        StorageCommand::Backup { manager, source } => {
+                            // Silent maintenance: failures are logged, never
+                            // surfaced as toasts.
+                            match manager.snapshot_file(&source) {
+                                Ok(path) => {
+                                    tracing::debug!(path = %path.display(), "rolling backup written");
+                                }
+                                Err(error) => {
+                                    tracing::warn!(%error, "rolling backup failed");
+                                }
+                            }
+                        }
                         StorageCommand::Flush { acknowledged } => {
                             let _ = acknowledged.send(());
                         }
@@ -367,6 +385,22 @@ impl StorageWorker {
                 max_age_days,
             })
             .map_err(|_| StorageQueueError::Closed)
+    }
+
+    /// Queue a rolling backup of the database file at `source`.
+    pub fn queue_backup(
+        &self,
+        manager: BackupManager,
+        source: PathBuf,
+    ) -> Result<(), StorageQueueError> {
+        self.commands
+            .as_ref()
+            .ok_or(StorageQueueError::Closed)?
+            .try_send(StorageCommand::Backup { manager, source })
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => StorageQueueError::Full,
+                mpsc::TrySendError::Disconnected(_) => StorageQueueError::Closed,
+            })
     }
 
     pub fn try_recv(&self) -> Option<StorageEvent> {

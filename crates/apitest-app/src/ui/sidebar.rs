@@ -4,7 +4,6 @@ use eframe::egui::{self, RichText, TextFormat, text::LayoutJob};
 use crate::app::ApiTestApp;
 use crate::i18n::{Language, tr};
 use crate::services::document::document_snapshot;
-use crate::services::history::{HISTORY_MAX_AGE_DAYS, HISTORY_MAX_RECORDS};
 use crate::services::tree::TreeAction;
 use crate::state::action::{Confirmation, PendingAction};
 use crate::state::workspace::{ResourceRow, WorkspaceRequest};
@@ -384,10 +383,14 @@ impl ApiTestApp {
                 ui.label(
                     RichText::new(match self.language {
                         Language::Chinese => {
-                            format!("保留最近 {HISTORY_MAX_RECORDS} 条 / {HISTORY_MAX_AGE_DAYS} 天")
+                            format!(
+                                "保留最近 {} 条 / {} 天",
+                                self.history_max_records, self.history_max_age_days
+                            )
                         }
                         Language::English => format!(
-                            "Keeps {HISTORY_MAX_RECORDS} records / {HISTORY_MAX_AGE_DAYS} days"
+                            "Keeps {} records / {} days",
+                            self.history_max_records, self.history_max_age_days,
                         ),
                     })
                     .small()

@@ -9,8 +9,8 @@ use apitest_core::{
 };
 use apitest_interop::{CodeLanguage, OpenApiIssue};
 use apitest_runtime::{
-    ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, ScenarioReport, ScriptEngine,
-    WebSocketExecutor,
+    ExecutorRegistry, GrpcExecutor, HttpExecutor, MockServer, PersistentCookieJar, ScenarioReport,
+    ScriptEngine, WebSocketExecutor,
 };
 use apitest_storage::{
     BodyStore, CachingSecretStore, Database, PageRequest, SecretStore, SystemSecretStore,
@@ -22,7 +22,10 @@ use crate::environment::EnvironmentDraft;
 use crate::i18n::{self, Language};
 use crate::persistence::StorageWorker;
 use crate::services::document::{SearchCache, document_snapshot};
-use crate::services::history::HISTORY_MAX_RECORDS;
+use crate::services::history::{
+    HISTORY_AGE_RANGE, HISTORY_MAX_AGE_DAYS, HISTORY_MAX_AGE_DAYS_SETTING, HISTORY_MAX_RECORDS,
+    HISTORY_MAX_RECORDS_SETTING, HISTORY_RECORDS_RANGE,
+};
 use crate::services::loader::{
     active_environment_setting, load_automation, load_document_tabs, load_setting, load_workspace,
     open_database,
@@ -48,6 +51,8 @@ pub(crate) const DOCUMENT_TABS_SETTING: &str = "ui.document_tabs";
 
 pub(crate) const FONT_CACHE_SETTING: &str = "ui.cjk_font_cache";
 
+pub(crate) const COOKIE_JAR_SETTING: &str = "http.cookie_jar";
+
 pub struct ApiTestApp {
     pub(crate) runtime: Arc<tokio::runtime::Runtime>,
     pub(crate) executors: Arc<ExecutorRegistry>,
@@ -56,6 +61,9 @@ pub struct ApiTestApp {
     pub(crate) database: Option<Arc<Database>>,
     pub(crate) body_store: Option<BodyStore>,
     pub(crate) run_records: Vec<RunRecord>,
+    /// Retention applied when a run finishes; user-configurable in settings.
+    pub(crate) history_max_records: usize,
+    pub(crate) history_max_age_days: i64,
     pub(crate) selected_history: usize,
     pub(crate) history_body_preview: String,
     pub(crate) history_body_truncated: bool,
@@ -113,6 +121,15 @@ pub struct ApiTestApp {
     pub(crate) allow_close: bool,
     /// When the edit-snapshot sweep last ran; see `sync_edit_snapshots`.
     pub(crate) last_edit_sweep: Option<Instant>,
+    /// When a rolling backup was last queued; see `schedule_backups`.
+    pub(crate) last_backup: Option<Instant>,
+    /// The jar every HTTP request reads and writes; shown in the cookie
+    /// manager and persisted across restarts.
+    pub(crate) cookie_jar: Arc<PersistentCookieJar>,
+    /// A run finished since the jar was last saved.
+    pub(crate) cookies_dirty: bool,
+    pub(crate) last_cookie_save: Option<Instant>,
+    pub(crate) show_cookies: bool,
     /// Cached sidebar/palette search results; see `cached_search_hits`.
     pub(crate) search_cache: SearchCache,
     /// Cached snippet output keyed by request, language and edit revision.
@@ -195,7 +212,22 @@ impl ApiTestApp {
             SystemSecretStore::new("ApiTest"),
             std::time::Duration::from_secs(30),
         ));
-        let http: Arc<dyn ProtocolExecutor> = Arc::new(HttpExecutor::new(Arc::clone(&secrets)));
+        let cookie_jar = Arc::new(
+            database
+                .as_deref()
+                .and_then(|database| {
+                    database
+                        .get_setting::<String>(COOKIE_JAR_SETTING)
+                        .ok()
+                        .flatten()
+                })
+                .map(|json| PersistentCookieJar::from_json(&json))
+                .unwrap_or_default(),
+        );
+        let http: Arc<dyn ProtocolExecutor> = Arc::new(HttpExecutor::with_cookie_jar(
+            Arc::clone(&secrets),
+            Arc::clone(&cookie_jar),
+        ));
         let websocket: Arc<dyn ProtocolExecutor> =
             Arc::new(WebSocketExecutor::new(Arc::clone(&secrets)));
         let grpc: Arc<dyn ProtocolExecutor> = Arc::new(GrpcExecutor::new(Arc::clone(&secrets)));
@@ -211,11 +243,23 @@ impl ApiTestApp {
         let (scenarios, mock_profiles, automation_errors) =
             load_automation(database.as_deref(), project.id);
         startup_errors.extend(automation_errors);
+        let history_max_records = load_setting(
+            database.as_deref(),
+            HISTORY_MAX_RECORDS_SETTING,
+            HISTORY_MAX_RECORDS,
+        )
+        .clamp(*HISTORY_RECORDS_RANGE.start(), *HISTORY_RECORDS_RANGE.end());
+        let history_max_age_days = load_setting(
+            database.as_deref(),
+            HISTORY_MAX_AGE_DAYS_SETTING,
+            HISTORY_MAX_AGE_DAYS,
+        )
+        .clamp(*HISTORY_AGE_RANGE.start(), *HISTORY_AGE_RANGE.end());
         let run_records = database
             .as_deref()
             .map(|database| {
                 database
-                    .list_run_records(project.id, PageRequest::new(0, HISTORY_MAX_RECORDS))
+                    .list_run_records(project.id, PageRequest::new(0, history_max_records))
                     .map(|page| page.items)
             })
             .transpose()
@@ -304,6 +348,8 @@ impl ApiTestApp {
             database,
             body_store,
             run_records,
+            history_max_records,
+            history_max_age_days,
             selected_history: 0,
             history_body_preview: String::new(),
             history_body_truncated: false,
@@ -360,6 +406,11 @@ impl ApiTestApp {
             openapi_issues: Vec::new(),
             allow_close: false,
             last_edit_sweep: None,
+            last_backup: None,
+            cookie_jar,
+            cookies_dirty: false,
+            last_cookie_save: None,
+            show_cookies: false,
             search_cache: SearchCache::default(),
             snippet_cache: None,
         }
@@ -374,6 +425,8 @@ impl eframe::App for ApiTestApp {
         self.sync_edit_snapshots(context);
         self.schedule_request_autosaves(context);
         self.schedule_environment_autosaves(context);
+        self.schedule_backups();
+        self.save_cookie_jar_if_due();
         if self.sessions.any_active() {
             // Keep the elapsed/byte readouts ticking while something streams.
             context.request_repaint_after(std::time::Duration::from_millis(100));
@@ -390,6 +443,10 @@ impl eframe::App for ApiTestApp {
         if self.allow_close {
             context.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+
+    fn on_exit(&mut self) {
+        self.save_cookie_jar();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -460,6 +517,9 @@ impl eframe::App for ApiTestApp {
         }
         if self.show_snippet {
             self.snippet_window(ui.ctx());
+        }
+        if self.show_cookies {
+            self.cookies_window(ui.ctx());
         }
         self.command_palette(ui.ctx());
         self.rename_window(ui.ctx());

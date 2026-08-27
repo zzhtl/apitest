@@ -1,4 +1,4 @@
-use apitest_core::{BodySpec, HttpSpec};
+use apitest_core::{BodySpec, GrpcSpec, HttpSpec, WebSocketSpec};
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +101,129 @@ fn python_requests(spec: &HttpSpec) -> String {
         spec.method.to_string(),
         render_url(spec)
     )
+}
+
+/// Snippets for a WebSocket session. `Curl` maps to a `websocat` command
+/// (the closest command-line equivalent); other languages have no meaningful
+/// WebSocket form and return `None` so the UI can hide them.
+pub fn generate_websocket_code(spec: &WebSocketSpec, language: CodeLanguage) -> Option<String> {
+    match language {
+        CodeLanguage::Curl => Some(websocat(spec)),
+        CodeLanguage::JavaScriptFetch => Some(websocket_javascript(spec)),
+        CodeLanguage::RustReqwest | CodeLanguage::PythonRequests => None,
+    }
+}
+
+/// Snippets for a gRPC call: only a `grpcurl` command line is generated.
+pub fn generate_grpc_code(spec: &GrpcSpec, language: CodeLanguage) -> Option<String> {
+    match language {
+        CodeLanguage::Curl => Some(grpcurl(spec)),
+        _ => None,
+    }
+}
+
+fn websocat(spec: &WebSocketSpec) -> String {
+    let mut command = format!("websocat {}", shell_quote(&render_websocket_url(spec)));
+    for header in spec.headers.iter().filter(|header| header.enabled) {
+        command.push_str(&format!(
+            " \\\n  -H {}",
+            shell_quote(&format!("{}: {}", header.name, header.value))
+        ));
+    }
+    if !spec.subprotocols.is_empty() {
+        command.push_str(&format!(
+            " \\\n  --protocol {}",
+            shell_quote(&spec.subprotocols.join(","))
+        ));
+    }
+    command
+}
+
+fn websocket_javascript(spec: &WebSocketSpec) -> String {
+    let url = render_websocket_url(spec);
+    let mut script = String::new();
+    if spec.headers.iter().any(|header| header.enabled) {
+        script.push_str(
+            "// Browsers cannot set custom handshake headers; use the websocat snippet for those.\n",
+        );
+    }
+    if spec.subprotocols.is_empty() {
+        script.push_str(&format!("const socket = new WebSocket({url:?});\n"));
+    } else {
+        script.push_str(&format!(
+            "const socket = new WebSocket({url:?}, {subprotocols});\n",
+            subprotocols = serde_json::to_string(&spec.subprotocols).unwrap_or_default()
+        ));
+    }
+    script.push_str(
+        "socket.addEventListener(\"open\", () => socket.send(\"hello\"));\n\
+         socket.addEventListener(\"message\", (event) => console.log(event.data));\n\
+         socket.addEventListener(\"close\", (event) => console.log(\"closed\", event.code));",
+    );
+    script
+}
+
+fn grpcurl(spec: &GrpcSpec) -> String {
+    let endpoint = spec
+        .endpoint
+        .strip_prefix("http://")
+        .or_else(|| spec.endpoint.strip_prefix("https://"))
+        .unwrap_or(&spec.endpoint)
+        .trim_end_matches('/');
+    let plaintext = spec.endpoint.starts_with("http://") || !spec.validate_tls;
+    let mut command = "grpcurl".to_owned();
+    if plaintext {
+        command.push_str(" -plaintext");
+    }
+    for entry in spec.metadata.iter().filter(|entry| entry.enabled) {
+        command.push_str(&format!(
+            " \\\n  -H {}",
+            shell_quote(&format!("{}: {}", entry.name, entry.value))
+        ));
+    }
+    if !spec.message_json.trim().is_empty() {
+        command.push_str(&format!(" \\\n  -d {}", shell_quote(&spec.message_json)));
+    }
+    if !spec.use_reflection {
+        for path in &spec.import_paths {
+            command.push_str(&format!(
+                " \\\n  -import-path {}",
+                shell_quote(&path.display().to_string())
+            ));
+        }
+        for path in &spec.proto_files {
+            command.push_str(&format!(
+                " \\\n  -proto {}",
+                shell_quote(&path.display().to_string())
+            ));
+        }
+        if let Some(path) = &spec.descriptor_set {
+            command.push_str(&format!(
+                " \\\n  -protoset {}",
+                shell_quote(&path.display().to_string())
+            ));
+        }
+    }
+    command.push_str(&format!(
+        " \\\n  {} {}/{}",
+        shell_quote(endpoint),
+        spec.service,
+        spec.method
+    ));
+    command
+}
+
+fn render_websocket_url(spec: &WebSocketSpec) -> String {
+    let Ok(mut url) = Url::parse(&spec.url) else {
+        return spec.url.clone();
+    };
+    {
+        let mut query = url.query_pairs_mut();
+        for parameter in spec.query.iter().filter(|parameter| parameter.enabled) {
+            query.append_pair(&parameter.name, &parameter.value);
+        }
+    }
+    url.into()
 }
 
 fn text_body(body: &BodySpec) -> Option<&str> {

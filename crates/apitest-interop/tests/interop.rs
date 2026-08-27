@@ -558,3 +558,73 @@ fn imports_v1_portable_projects_and_exports_v2() {
         2
     );
 }
+
+#[test]
+fn websocket_snippets_cover_websocat_and_browser_javascript() {
+    use apitest_core::WebSocketSpec;
+    use apitest_interop::generate_websocket_code;
+
+    let spec = WebSocketSpec {
+        url: "wss://ws.example.com/feed".into(),
+        query: vec![KeyValue::enabled("room", "42")],
+        headers: vec![KeyValue::enabled("Authorization", "Bearer token")],
+        subprotocols: vec!["graphql-ws".into()],
+        validate_tls: true,
+        connect_timeout_ms: 10_000,
+    };
+
+    let websocat = generate_websocket_code(&spec, CodeLanguage::Curl)
+        .expect("websocat snippet should generate");
+    assert_eq!(
+        websocat,
+        "websocat 'wss://ws.example.com/feed?room=42' \\\n  -H 'Authorization: Bearer token' \\\n  --protocol 'graphql-ws'"
+    );
+
+    let javascript = generate_websocket_code(&spec, CodeLanguage::JavaScriptFetch)
+        .expect("JavaScript snippet should generate");
+    assert!(javascript.contains(
+        "const socket = new WebSocket(\"wss://ws.example.com/feed?room=42\", [\"graphql-ws\"]);"
+    ));
+    assert!(javascript.contains("Browsers cannot set custom handshake headers"));
+
+    assert!(generate_websocket_code(&spec, CodeLanguage::PythonRequests).is_none());
+}
+
+#[test]
+fn grpc_snippets_render_grpcurl_with_protos_metadata_and_plaintext() {
+    use apitest_core::{GrpcCallKind, GrpcSpec};
+    use apitest_interop::generate_grpc_code;
+
+    let spec = GrpcSpec {
+        endpoint: "http://localhost:50051".into(),
+        service: "greeter.Greeter".into(),
+        method: "SayHello".into(),
+        call_kind: GrpcCallKind::Unary,
+        descriptor_set: None,
+        proto_files: vec!["proto/greeter.proto".into()],
+        import_paths: vec!["proto".into()],
+        use_reflection: false,
+        metadata: vec![KeyValue::enabled("x-tenant", "dev")],
+        message_json: r#"{"name":"ApiTest"}"#.into(),
+        validate_tls: false,
+        timeout_ms: 15_000,
+    };
+
+    let command =
+        generate_grpc_code(&spec, CodeLanguage::Curl).expect("grpcurl snippet should generate");
+    assert_eq!(
+        command,
+        "grpcurl -plaintext \\\n  -H 'x-tenant: dev' \\\n  -d '{\"name\":\"ApiTest\"}' \\\n  -import-path 'proto' \\\n  -proto 'proto/greeter.proto' \\\n  'localhost:50051' greeter.Greeter/SayHello"
+    );
+    assert!(generate_grpc_code(&spec, CodeLanguage::RustReqwest).is_none());
+
+    let mut reflective = spec;
+    reflective.use_reflection = true;
+    reflective.endpoint = "https://api.example.com:443".into();
+    reflective.validate_tls = true;
+    let command = generate_grpc_code(&reflective, CodeLanguage::Curl)
+        .expect("reflection snippet should generate");
+    assert!(!command.contains("-plaintext"));
+    assert!(!command.contains("-proto"));
+    assert!(command.contains("'api.example.com:443' greeter.Greeter/SayHello"));
+}

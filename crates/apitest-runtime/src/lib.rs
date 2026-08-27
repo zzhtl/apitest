@@ -1,5 +1,6 @@
 //! Protocol and automation runtime for ApiTest.
 
+mod cookies;
 mod grpc;
 mod http;
 mod mock;
@@ -9,6 +10,7 @@ mod script;
 mod verification;
 mod websocket;
 
+pub use cookies::{PersistentCookieJar, StoredCookie};
 pub use grpc::{
     GrpcDescriptor, GrpcDescriptorError, GrpcDescriptorFileError, GrpcExecutor, GrpcMethod,
 };

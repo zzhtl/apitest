@@ -8,8 +8,8 @@ use std::{
 use apitest_core::{
     ApiKeyLocation, AuthSpec, BodySpec, Environment, ExecutionError, ExecutionEvent,
     ExecutionMetrics, ExecutionRequest, ExecutionStream, FormField, GraphQlSpec, HttpSpec,
-    MultipartPart, OAuth2Grant, ProtocolExecutor, ProtocolKind, ProtocolSpec, ResponseHead,
-    Variable,
+    KeyValue, MultipartPart, OAuth2Grant, ProtocolExecutor, ProtocolKind, ProtocolSpec,
+    ResponseHead, Variable,
 };
 use apitest_storage::SecretStore;
 use async_stream::try_stream;
@@ -22,21 +22,45 @@ use indexmap::IndexMap;
 use md5::Md5;
 use reqwest::{
     Client, Method, Proxy,
-    cookie::{CookieStore, Jar},
+    cookie::CookieStore,
     header::{AUTHORIZATION, COOKIE, WWW_AUTHENTICATE},
     redirect::Policy,
 };
 use sha2::{Digest as _, Sha256};
+
+use crate::cookies::PersistentCookieJar;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 #[derive(Clone)]
 pub struct HttpExecutor {
     secrets: Arc<dyn SecretStore>,
-    cookies: Arc<Jar>,
+    cookies: Arc<PersistentCookieJar>,
     /// Built clients keyed by their connection-affecting settings, so repeated
     /// sends reuse the pool (keep-alive, HTTP/2) instead of a fresh TLS setup.
     clients: Arc<Mutex<HashMap<ClientKey, Client>>>,
+    /// OAuth tokens by resolved grant inputs. Every send used to hit the
+    /// token endpoint again, discarding `expires_in` and `refresh_token`.
+    tokens: Arc<Mutex<HashMap<TokenKey, CachedToken>>>,
+}
+
+/// Resolved inputs that identify one OAuth token grant.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct TokenKey {
+    token_url: String,
+    client_id: String,
+    scopes: String,
+    grant: OAuth2Grant,
+    username: Option<String>,
+}
+
+#[derive(Clone)]
+struct CachedToken {
+    access_token: String,
+    /// Absolute expiry with a safety margin already subtracted. Tokens whose
+    /// response carried no `expires_in` are never cached.
+    expires_at: Instant,
+    refresh_token: Option<String>,
 }
 
 /// The subset of a request that forces a distinct `reqwest::Client`.
@@ -56,11 +80,25 @@ const CLIENT_CACHE_LIMIT: usize = 8;
 
 impl HttpExecutor {
     pub fn new(secrets: Arc<dyn SecretStore>) -> Self {
+        Self::with_cookie_jar(secrets, Arc::new(PersistentCookieJar::default()))
+    }
+
+    /// Build the executor around an existing jar, so the application can show
+    /// and persist the same cookies the requests use.
+    pub fn with_cookie_jar(
+        secrets: Arc<dyn SecretStore>,
+        cookies: Arc<PersistentCookieJar>,
+    ) -> Self {
         Self {
             secrets,
-            cookies: Arc::new(Jar::default()),
+            cookies,
             clients: Arc::new(Mutex::new(HashMap::new())),
+            tokens: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn cookie_jar(&self) -> Arc<PersistentCookieJar> {
+        Arc::clone(&self.cookies)
     }
 
     async fn client_for(
@@ -207,44 +245,126 @@ impl ProtocolExecutor for HttpExecutor {
                 &request.environment,
                 &request.local_variables,
             )?;
-            let (spec, is_sse) = normalize_protocol(request.protocol)?;
+            let (spec, sse) = normalize_protocol(request.protocol)?;
             let client = executor.client_for(&spec, &environment, &local_variables).await?;
-            let prepared = PreparedRequest::new(
-                &spec,
-                &environment,
-                &local_variables,
-                &*executor.secrets,
-                Arc::clone(&executor.cookies),
-                client,
-            ).await?;
-            let sent_bytes = prepared.sent_bytes;
-            let response = tokio::select! {
-                _ = cancellation.cancelled() => Err(ExecutionError::Cancelled),
-                result = prepared.send() => result,
-            }?;
-
-            let head = response_head(&response);
-            yield ExecutionEvent::ResponseHead(head);
-
             let mut received_bytes = 0_u64;
-            if is_sse {
-                let mut events = response.bytes_stream().eventsource();
-                loop {
-                    let next = tokio::select! {
+            let mut sent_bytes = 0_u64;
+            if let Some(options) = sse {
+                // SSE lives as long as events keep coming: `timeout_ms` acts
+                // as connect + idle timeout, never as a total deadline (the
+                // old total deadline killed every feed at 30 s).
+                let idle = Duration::from_millis(spec.timeout_ms.max(1));
+                let mut reconnect_delay = Duration::from_secs(1);
+                let mut last_event_id: Option<String> = None;
+                let mut head_sent = false;
+                'attempts: loop {
+                    let mut attempt = spec.clone();
+                    if let Some(id) = &last_event_id {
+                        attempt
+                            .headers
+                            .push(KeyValue::enabled("Last-Event-ID", id.clone()));
+                    }
+                    let prepared = PreparedRequest::new(
+                        &attempt,
+                        &environment,
+                        &local_variables,
+                        &*executor.secrets,
+                        Arc::clone(&executor.cookies),
+                        client.clone(),
+                        Arc::clone(&executor.tokens),
+                        true,
+                    ).await?;
+                    sent_bytes = sent_bytes.saturating_add(prepared.sent_bytes);
+                    let connected = tokio::select! {
                         _ = cancellation.cancelled() => Err(ExecutionError::Cancelled),
-                        item = events.next() => Ok(item),
-                    }?;
-                    let Some(event) = next else { break };
-                    let event = event.map_err(|error| ExecutionError::Protocol(error.to_string()))?;
-                    received_bytes = received_bytes.saturating_add(event.data.len() as u64);
-                    yield ExecutionEvent::Message {
-                        outgoing: false,
-                        media_type: Some("text/event-stream".to_owned()),
-                        data: Bytes::from(event.data),
-                        at: Utc::now(),
+                        result = tokio::time::timeout(idle, prepared.send()) => match result {
+                            Ok(result) => result,
+                            Err(_) => Err(ExecutionError::Timeout { timeout_ms: spec.timeout_ms.max(1) }),
+                        },
                     };
+                    let response = match connected {
+                        Ok(response) => response,
+                        Err(ExecutionError::Cancelled) => Err(ExecutionError::Cancelled)?,
+                        Err(error) if options.reconnect => {
+                            tracing::debug!(%error, "SSE connection failed; reconnecting");
+                            reconnect_delay = wait_backoff(&cancellation, reconnect_delay).await?;
+                            continue 'attempts;
+                        }
+                        Err(error) => Err(error)?,
+                    };
+                    if !head_sent {
+                        yield ExecutionEvent::ResponseHead(response_head(&response));
+                        head_sent = true;
+                    }
+                    let mut events = response.bytes_stream().eventsource();
+                    loop {
+                        let next = tokio::select! {
+                            _ = cancellation.cancelled() => Err(ExecutionError::Cancelled),
+                            item = tokio::time::timeout(idle, events.next()) => Ok(item),
+                        }?;
+                        let item = match next {
+                            Ok(item) => item,
+                            Err(_) if options.reconnect => {
+                                tracing::debug!("SSE stream idle; reconnecting");
+                                break;
+                            }
+                            Err(_) => {
+                                Err(ExecutionError::Timeout { timeout_ms: spec.timeout_ms.max(1) })?;
+                                unreachable!("timeout error was raised above")
+                            }
+                        };
+                        let Some(event) = item else {
+                            if options.reconnect {
+                                // Server closed the stream; resume from the
+                                // last seen event id.
+                                break;
+                            }
+                            break 'attempts;
+                        };
+                        let event = match event {
+                            Ok(event) => event,
+                            Err(error) if options.reconnect => {
+                                tracing::debug!(%error, "SSE stream failed; reconnecting");
+                                break;
+                            }
+                            Err(error) => {
+                                Err(ExecutionError::Protocol(error.to_string()))?;
+                                unreachable!("protocol error was raised above")
+                            }
+                        };
+                        if !event.id.is_empty() {
+                            last_event_id = Some(event.id.clone());
+                        }
+                        reconnect_delay = Duration::from_secs(1);
+                        received_bytes = received_bytes.saturating_add(event.data.len() as u64);
+                        yield ExecutionEvent::Message {
+                            outgoing: false,
+                            media_type: Some("text/event-stream".to_owned()),
+                            data: Bytes::from(event.data),
+                            at: Utc::now(),
+                        };
+                    }
+                    reconnect_delay = wait_backoff(&cancellation, reconnect_delay).await?;
                 }
             } else {
+                let prepared = PreparedRequest::new(
+                    &spec,
+                    &environment,
+                    &local_variables,
+                    &*executor.secrets,
+                    Arc::clone(&executor.cookies),
+                    client,
+                    Arc::clone(&executor.tokens),
+                    false,
+                ).await?;
+                sent_bytes = prepared.sent_bytes;
+                let response = tokio::select! {
+                    _ = cancellation.cancelled() => Err(ExecutionError::Cancelled),
+                    result = prepared.send() => result,
+                }?;
+
+                yield ExecutionEvent::ResponseHead(response_head(&response));
+
                 let mut body = response.bytes_stream();
                 loop {
                     let next = tokio::select! {
@@ -269,11 +389,35 @@ impl ProtocolExecutor for HttpExecutor {
     }
 }
 
-fn normalize_protocol(protocol: ProtocolSpec) -> Result<(HttpSpec, bool), ExecutionError> {
+/// How server-sent events behave beyond the plain request.
+struct SseOptions {
+    reconnect: bool,
+}
+
+/// Sleep out the reconnect delay (unless cancelled first) and return the next,
+/// exponentially grown delay.
+async fn wait_backoff(
+    cancellation: &CancellationToken,
+    delay: Duration,
+) -> Result<Duration, ExecutionError> {
+    tokio::select! {
+        _ = cancellation.cancelled() => Err(ExecutionError::Cancelled),
+        _ = tokio::time::sleep(delay) => Ok((delay * 2).min(Duration::from_secs(30))),
+    }
+}
+
+fn normalize_protocol(
+    protocol: ProtocolSpec,
+) -> Result<(HttpSpec, Option<SseOptions>), ExecutionError> {
     match protocol {
-        ProtocolSpec::Http(spec) => Ok((spec, false)),
-        ProtocolSpec::Sse(spec) => Ok((spec.request, true)),
-        ProtocolSpec::GraphQl(spec) => graph_ql_to_http(spec).map(|http| (http, false)),
+        ProtocolSpec::Http(spec) => Ok((spec, None)),
+        ProtocolSpec::Sse(spec) => Ok((
+            spec.request,
+            Some(SseOptions {
+                reconnect: spec.reconnect,
+            }),
+        )),
+        ProtocolSpec::GraphQl(spec) => graph_ql_to_http(spec).map(|http| (http, None)),
         other => Err(ExecutionError::InvalidRequest(format!(
             "HTTP executor cannot run {:?}",
             other.kind()
@@ -310,13 +454,16 @@ struct PreparedRequest {
 }
 
 impl PreparedRequest {
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         spec: &HttpSpec,
         environment: &Environment,
         local_variables: &[Variable],
         secrets: &dyn SecretStore,
-        cookies: Arc<Jar>,
+        cookies: Arc<PersistentCookieJar>,
         client: Client,
+        tokens: Arc<Mutex<HashMap<TokenKey, CachedToken>>>,
+        streaming: bool,
     ) -> Result<Self, ExecutionError> {
         let url = resolve_required(environment, local_variables, &spec.url, "URL")?;
         let mut url = Url::parse(&url)
@@ -333,9 +480,12 @@ impl PreparedRequest {
         }
         let method = Method::from_bytes(spec.method.to_string().as_bytes())
             .map_err(|error| ExecutionError::InvalidRequest(error.to_string()))?;
-        let mut builder = client
-            .request(method, url.clone())
-            .timeout(Duration::from_millis(spec.timeout_ms.max(1)));
+        let mut builder = client.request(method, url.clone());
+        if !streaming {
+            // A total deadline is right for request/response, fatal for a
+            // stream: the caller applies idle timeouts instead.
+            builder = builder.timeout(Duration::from_millis(spec.timeout_ms.max(1)));
+        }
 
         let mut aws_headers = Vec::new();
         for header in spec.headers.iter().filter(|header| header.enabled) {
@@ -496,6 +646,7 @@ impl PreparedRequest {
             &spec.auth,
             secrets,
             &client,
+            &tokens,
             environment,
             local_variables,
             spec.method,
@@ -563,7 +714,7 @@ impl PreparedRequest {
 async fn build_client(
     spec: &HttpSpec,
     proxy: Option<(String, Option<(String, String)>)>,
-    cookies: Arc<Jar>,
+    cookies: Arc<PersistentCookieJar>,
 ) -> Result<Client, ExecutionError> {
     let mut builder = Client::builder()
         .redirect(if spec.follow_redirects {
@@ -669,6 +820,7 @@ async fn apply_auth(
     auth: &AuthSpec,
     secrets: &dyn SecretStore,
     client: &Client,
+    tokens: &Mutex<HashMap<TokenKey, CachedToken>>,
     environment: &Environment,
     local_variables: &[Variable],
     method: apitest_core::HttpMethod,
@@ -714,6 +866,7 @@ async fn apply_auth(
             } else {
                 acquire_oauth_token(
                     client,
+                    tokens,
                     *grant,
                     token_url,
                     client_id,
@@ -777,6 +930,7 @@ async fn apply_auth(
 #[allow(clippy::too_many_arguments)]
 async fn acquire_oauth_token(
     client: &Client,
+    tokens: &Mutex<HashMap<TokenKey, CachedToken>>,
     grant: OAuth2Grant,
     token_url: &str,
     client_id: &str,
@@ -796,6 +950,67 @@ async fn acquire_oauth_token(
     }
     let token_url = resolve_required(environment, local_variables, token_url, "OAuth token URL")?;
     let client_id = resolve_required(environment, local_variables, client_id, "OAuth client ID")?;
+    let username = match (grant, username) {
+        (OAuth2Grant::Password, Some(username)) => Some(resolve_required(
+            environment,
+            local_variables,
+            username,
+            "OAuth username",
+        )?),
+        (OAuth2Grant::Password, None) => {
+            return Err(ExecutionError::Authentication(
+                "OAuth password flow username is missing".into(),
+            ));
+        }
+        _ => None,
+    };
+    let key = TokenKey {
+        token_url: token_url.clone(),
+        client_id: client_id.clone(),
+        scopes: scopes.join(" "),
+        grant,
+        username: username.clone(),
+    };
+
+    // Fresh cached token: no network round-trip at all.
+    let refresh_token = {
+        let tokens = tokens
+            .lock()
+            .expect("OAuth token cache should not be poisoned");
+        match tokens.get(&key) {
+            Some(cached) if Instant::now() < cached.expires_at => {
+                tracing::debug!("reusing cached OAuth token");
+                return Ok(cached.access_token.clone());
+            }
+            Some(cached) => cached.refresh_token.clone(),
+            None => None,
+        }
+    };
+
+    let secret = client_secret
+        .map(|reference| secret_value(reference, secrets))
+        .transpose()?;
+
+    // Expired with a refresh token: try the cheap renewal first.
+    if let Some(refresh) = refresh_token {
+        let mut fields = vec![
+            ("grant_type", "refresh_token".to_owned()),
+            ("refresh_token", refresh),
+        ];
+        if secret.is_none() {
+            fields.push(("client_id", client_id.clone()));
+        }
+        match request_token(client, &token_url, fields, &client_id, secret.as_deref()).await {
+            Ok(response) => {
+                tracing::debug!("refreshed OAuth token");
+                return Ok(store_token(tokens, key, response));
+            }
+            Err(error) => {
+                tracing::debug!(%error, "OAuth refresh failed; falling back to the full grant");
+            }
+        }
+    }
+
     let mut fields = vec![(
         "grant_type",
         match grant {
@@ -809,29 +1024,71 @@ async fn acquire_oauth_token(
         fields.push(("scope", scopes.join(" ")));
     }
     if grant == OAuth2Grant::Password {
-        let username = username.ok_or_else(|| {
-            ExecutionError::Authentication("OAuth password flow username is missing".into())
-        })?;
+        let username = username.clone().expect("username was resolved above");
         let password = password.ok_or_else(|| {
             ExecutionError::Authentication("OAuth password flow password is missing".into())
         })?;
-        fields.push((
-            "username",
-            resolve_required(environment, local_variables, username, "OAuth username")?,
-        ));
+        fields.push(("username", username));
         fields.push(("password", secret_value(password, secrets)?));
     }
-    let secret = client_secret
-        .map(|reference| secret_value(reference, secrets))
-        .transpose()?;
     if secret.is_none() {
         fields.push(("client_id", client_id.clone()));
     }
+    let response = request_token(client, &token_url, fields, &client_id, secret.as_deref()).await?;
+    Ok(store_token(tokens, key, response))
+}
+
+struct TokenResponse {
+    access_token: String,
+    expires_in: Option<u64>,
+    refresh_token: Option<String>,
+}
+
+/// Cache the token when the server told us how long it lives, and return it.
+fn store_token(
+    tokens: &Mutex<HashMap<TokenKey, CachedToken>>,
+    key: TokenKey,
+    response: TokenResponse,
+) -> String {
+    /// Renew this long before the reported expiry so an almost-dead token is
+    /// never sent.
+    const EXPIRY_MARGIN: Duration = Duration::from_secs(60);
+    let mut tokens = tokens
+        .lock()
+        .expect("OAuth token cache should not be poisoned");
+    match response.expires_in {
+        Some(expires_in) => {
+            let lifetime = Duration::from_secs(expires_in).saturating_sub(EXPIRY_MARGIN);
+            tokens.insert(
+                key,
+                CachedToken {
+                    access_token: response.access_token.clone(),
+                    expires_at: Instant::now() + lifetime,
+                    refresh_token: response.refresh_token,
+                },
+            );
+        }
+        // Without `expires_in` there is no safe lifetime to assume; keep the
+        // old per-send behavior for this grant.
+        None => {
+            tokens.remove(&key);
+        }
+    }
+    response.access_token
+}
+
+async fn request_token(
+    client: &Client,
+    token_url: &str,
+    fields: Vec<(&'static str, String)>,
+    client_id: &str,
+    client_secret: Option<&str>,
+) -> Result<TokenResponse, ExecutionError> {
     let mut request = client
         .post(token_url)
         .timeout(Duration::from_secs(30))
         .form(&fields);
-    if let Some(secret) = secret {
+    if let Some(secret) = client_secret {
         request = request.basic_auth(client_id, Some(secret));
     }
     let response = request
@@ -855,14 +1112,23 @@ async fn acquire_oauth_token(
             "OAuth token request failed with {status}: {message}"
         )));
     }
-    value
+    let access_token = value
         .get("access_token")
         .and_then(serde_json::Value::as_str)
         .filter(|token| !token.is_empty())
         .map(str::to_owned)
         .ok_or_else(|| {
             ExecutionError::Authentication("OAuth token response has no access_token".into())
-        })
+        })?;
+    Ok(TokenResponse {
+        access_token,
+        expires_in: value.get("expires_in").and_then(serde_json::Value::as_u64),
+        refresh_token: value
+            .get("refresh_token")
+            .and_then(serde_json::Value::as_str)
+            .filter(|token| !token.is_empty())
+            .map(str::to_owned),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

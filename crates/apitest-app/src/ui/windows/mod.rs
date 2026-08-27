@@ -1,3 +1,4 @@
+pub(crate) mod cookies;
 pub(crate) mod palette;
 pub(crate) mod rename;
 pub(crate) mod snippet;
@@ -9,6 +10,10 @@ use eframe::egui::{self, RichText, Stroke};
 
 use crate::app::{ApiTestApp, LANGUAGE_SETTING, THEME_SETTING};
 use crate::i18n::Language;
+use crate::services::history::{
+    HISTORY_AGE_RANGE, HISTORY_MAX_AGE_DAYS_SETTING, HISTORY_MAX_RECORDS_SETTING,
+    HISTORY_RECORDS_RANGE,
+};
 use crate::state::action::{Confirmation, InteropAction, OpenApiPreviewTab, ToastKind};
 use crate::theme::tokens::icon as icon_size;
 use crate::theme::tokens::radius;
@@ -19,6 +24,8 @@ impl ApiTestApp {
         let mut open = self.show_settings;
         let mut theme_changed = false;
         let mut language_changed = false;
+        let mut history_changed = false;
+        let mut open_cookies = false;
         let dark_label = self.tr("深色", "Dark");
         let light_label = self.tr("浅色", "Light");
         egui::Window::new(self.tr("设置", "Settings"))
@@ -46,6 +53,32 @@ impl ApiTestApp {
                         .selectable_value(&mut self.language, Language::English, "English")
                         .changed();
                 });
+                ui.add_space(8.0);
+                ui.label(RichText::new(self.tr("运行历史", "Run history")).strong());
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("保留条数", "Records kept"));
+                    history_changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut self.history_max_records)
+                                .range(HISTORY_RECORDS_RANGE),
+                        )
+                        .changed();
+                    ui.label(self.tr("保留天数", "Days kept"));
+                    history_changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut self.history_max_age_days)
+                                .range(HISTORY_AGE_RANGE),
+                        )
+                        .changed();
+                });
+                ui.add_space(8.0);
+                ui.label(RichText::new("Cookie").strong());
+                if ui
+                    .button(self.tr("管理 Cookies", "Manage cookies"))
+                    .clicked()
+                {
+                    open_cookies = true;
+                }
                 ui.add_space(12.0);
                 ui.label(RichText::new(self.tr("快捷键", "Keyboard shortcuts")).strong());
                 let muted = ui.palette().muted;
@@ -79,6 +112,15 @@ impl ApiTestApp {
         if language_changed {
             let language = self.language;
             self.persist_setting(LANGUAGE_SETTING, &language);
+        }
+        if open_cookies {
+            self.show_cookies = true;
+        }
+        if history_changed {
+            let records = self.history_max_records;
+            let days = self.history_max_age_days;
+            self.persist_setting(HISTORY_MAX_RECORDS_SETTING, &records);
+            self.persist_setting(HISTORY_MAX_AGE_DAYS_SETTING, &days);
         }
     }
 
