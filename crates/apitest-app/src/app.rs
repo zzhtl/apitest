@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, mpsc},
+    time::Instant,
 };
 
 use apitest_core::{
@@ -18,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::environment::EnvironmentDraft;
 use crate::i18n::{self, Language};
 use crate::persistence::StorageWorker;
-use crate::services::document::document_snapshot;
+use crate::services::document::{SearchCache, document_snapshot};
 use crate::services::history::HISTORY_MAX_RECORDS;
 use crate::services::loader::{
     active_environment_setting, load_automation, load_document_tabs, load_setting, load_workspace,
@@ -103,6 +104,10 @@ pub struct ApiTestApp {
     pub(crate) openapi_html: String,
     pub(crate) openapi_issues: Vec<OpenApiIssue>,
     pub(crate) allow_close: bool,
+    /// When the edit-snapshot sweep last ran; see `sync_edit_snapshots`.
+    pub(crate) last_edit_sweep: Option<Instant>,
+    /// Cached sidebar/palette search results; see `cached_search_hits`.
+    pub(crate) search_cache: SearchCache,
 }
 
 impl ApiTestApp {
@@ -318,6 +323,8 @@ impl ApiTestApp {
             openapi_html: String::new(),
             openapi_issues: Vec::new(),
             allow_close: false,
+            last_edit_sweep: None,
+            search_cache: SearchCache::default(),
         }
     }
 }
@@ -327,11 +334,16 @@ impl eframe::App for ApiTestApp {
         self.drain_runtime(context);
         self.drain_storage();
         self.keyboard_shortcuts(context);
+        self.sync_edit_snapshots(context);
         self.schedule_request_autosaves(context);
         self.schedule_environment_autosaves(context);
+        if self.sessions.any_active() {
+            // Keep the elapsed/byte readouts ticking while something streams.
+            context.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         if context.input(|input| input.viewport().close_requested())
             && !self.allow_close
-            && self.workspace_dirty()
+            && self.workspace_dirty_strict()
         {
             context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if self.confirmation.is_none() {

@@ -87,6 +87,14 @@ impl Sessions {
         }
     }
 
+    /// Whether any tab is still streaming, i.e. the live progress readouts
+    /// need periodic repaints.
+    pub(crate) fn any_active(&self) -> bool {
+        self.items
+            .values()
+            .any(|session| session.response.is_active())
+    }
+
     /// Drop every session, cancelling what they were running.
     ///
     /// `next_run` deliberately keeps counting so a late event from the old

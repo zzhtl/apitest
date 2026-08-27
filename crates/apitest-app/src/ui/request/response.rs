@@ -10,7 +10,7 @@ use crate::theme::tokens::radius;
 use crate::theme::{self, UiExt};
 use crate::ui::code::code_view;
 use crate::ui::json_tree::json_tree;
-use crate::ui::widgets::{Tone, badge, empty_state, icon_button, tab_button};
+use crate::ui::widgets::{Tone, badge, empty_state, format_bytes, icon_button, tab_button};
 
 /// Fixed id of the find-in-response field so Ctrl+F can focus it.
 pub(crate) const RESPONSE_FIND_FIELD_ID: &str = "response_find_field";
@@ -49,7 +49,16 @@ impl ApiTestApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let response = &self.session().response;
                 if response.is_active() {
-                    ui.spinner();
+                    // A live readout instead of a spinner: the spinner forced a
+                    // repaint every frame, and it said nothing about progress.
+                    ui.label(
+                        RichText::new(format!(
+                            "{} ms  ·  ↓ {}",
+                            response.elapsed_ms(),
+                            format_bytes(response.streamed_bytes)
+                        ))
+                        .color(palette.info),
+                    );
                 }
                 if let Some(metrics) = response.metrics {
                     ui.label(

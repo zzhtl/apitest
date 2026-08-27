@@ -340,3 +340,35 @@ fn environment_save_is_acknowledged_by_the_background_worker() {
         "Staging"
     );
 }
+
+#[test]
+fn strict_dirty_checks_see_edits_the_sweep_has_not_observed_yet() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_eframe(test_app);
+
+    // A programmatic edit that no input event or sweep has synced yet.
+    harness.state_mut().requests[0].draft.url = "https://example.test/stale-snapshot".into();
+
+    // The cheap per-frame check still trusts the stale snapshot…
+    assert!(!harness.state().workspace_dirty());
+    // …while every decision point re-syncs and must see the edit.
+    assert!(harness.state_mut().workspace_dirty_strict());
+    assert!(harness.state().workspace_dirty());
+
+    // The sweep marked the change, so the debounced autosave becomes due and
+    // queues without any further input.
+    harness.state_mut().requests[0]
+        .autosave
+        .mark_changed(Instant::now() - Duration::from_secs(1));
+    let context = harness.ctx.clone();
+    harness.state_mut().schedule_request_autosaves(&context);
+    let event = harness
+        .state()
+        .storage_worker
+        .as_ref()
+        .expect("storage worker should exist")
+        .recv_timeout(Duration::from_secs(1))
+        .expect("autosave should complete");
+    assert!(matches!(event, StorageEvent::RequestSaved { .. }));
+}

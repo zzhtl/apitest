@@ -20,11 +20,14 @@ use crate::workbench::{DocumentId, DocumentKind};
 
 impl ApiTestApp {
     pub(crate) fn queue_action(&mut self, action: PendingAction) {
+        // Strict checks: the sweep may not have observed the newest edit, and
+        // a false "clean" here would drop the unsaved-changes prompt.
         let dirty = if action.leaves_workspace() {
-            self.workspace_dirty()
+            self.workspace_dirty_strict()
         } else if let PendingAction::CloseDocument(id) = action {
-            self.document_dirty(id)
+            self.document_dirty_strict(id)
         } else {
+            self.sync_current_edit_snapshot();
             self.current_dirty()
         };
         if dirty {
@@ -380,6 +383,7 @@ impl ApiTestApp {
         if let Some(active) = active_document {
             self.activate_document(active);
         }
+        self.invalidate_search_cache();
         let project_id = self.project.id;
         self.persist_setting(ACTIVE_PROJECT_SETTING, &project_id);
         if !errors.is_empty() {
@@ -406,6 +410,9 @@ impl ApiTestApp {
     }
 
     pub(crate) fn reload_resource_page(&mut self, parent_id: Option<EntityId>) {
+        // Every structural change (delete, import, rename, duplicate) funnels
+        // through here, so the search cache follows the tree.
+        self.invalidate_search_cache();
         let Some(database) = self.database.clone() else {
             return;
         };

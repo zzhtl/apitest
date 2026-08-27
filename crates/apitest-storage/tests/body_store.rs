@@ -52,6 +52,40 @@ fn redacts_secrets_even_when_they_cross_stream_chunks() {
 }
 
 #[test]
+fn redaction_with_no_secrets_passes_bytes_through_unchanged() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let store = BodyStore::new(temp.path()).expect("body store should initialize");
+    let mut sink = store
+        .begin_redacted(Vec::<&str>::new())
+        .expect("redacting body sink should open");
+
+    let payload = b"plain payload with [REDACTED]-looking text and secret words";
+    sink.write_all(payload).expect("chunk should write");
+    let body = sink.commit().expect("body should commit");
+
+    assert_eq!(body.size, payload.len() as u64);
+    assert_eq!(store.read_all(&body).expect("body should read"), payload);
+}
+
+#[test]
+fn redaction_batches_clean_spans_between_adjacent_and_repeated_secrets() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let store = BodyStore::new(temp.path()).expect("body store should initialize");
+    let mut sink = store
+        .begin_redacted(["alpha", "beta"])
+        .expect("redacting body sink should open");
+
+    sink.write_all(b"alphabeta start alpha middle beta end alpha")
+        .expect("chunk should write");
+    let body = sink.commit().expect("redacted body should commit");
+
+    assert_eq!(
+        store.read_all(&body).expect("redacted body should read"),
+        b"[REDACTED][REDACTED] start [REDACTED] middle [REDACTED] end [REDACTED]"
+    );
+}
+
+#[test]
 fn flush_preserves_a_partial_secret_for_the_next_write() {
     let temp = tempfile::tempdir().expect("temporary directory should exist");
     let store = BodyStore::new(temp.path()).expect("body store should initialize");

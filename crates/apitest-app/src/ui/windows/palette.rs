@@ -30,7 +30,7 @@ struct Entry {
 }
 
 impl ApiTestApp {
-    fn palette_entries(&self, query: &str) -> Vec<Entry> {
+    fn palette_entries(&mut self, query: &str) -> Vec<Entry> {
         let goto = self.tr("跳转", "Go to");
         let action = self.tr("动作", "Action");
         let mut entries = vec![
@@ -122,7 +122,7 @@ impl ApiTestApp {
                 command: Command::Interop(interop),
             });
         }
-        for hit in self.search_hits(query) {
+        for hit in self.cached_search_hits(query).0 {
             entries.push(Entry {
                 icon: "braces",
                 label: hit.name,

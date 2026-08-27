@@ -34,6 +34,9 @@ impl ApiTestApp {
     }
 
     pub(crate) fn save_workspace_and_wait(&mut self) -> bool {
+        // Snapshots may lag the drafts by one sweep tick; a save-everything
+        // decision must not skip a document the sweep has not seen yet.
+        self.sync_all_edit_snapshots(Instant::now());
         for index in 0..self.requests.len() {
             if self.requests[index].is_dirty()
                 && (!self.queue_request_save(index, true, false) || !self.flush_storage())
@@ -184,14 +187,92 @@ impl ApiTestApp {
         }
     }
 
+    /// How often every open document is re-checked for edits. The interval is
+    /// the ceiling on how stale a dirty indicator can be; the autosave
+    /// debounce (500 ms) still dominates when data is actually written.
+    pub(crate) const EDIT_SWEEP_INTERVAL: Duration = Duration::from_millis(250);
+
+    /// Refresh the change-detection snapshots that autosave and the dirty
+    /// indicators read.
+    ///
+    /// Serializing every open request on every frame cost hundreds of MB/s of
+    /// allocation with large bodies, so the selected document syncs on frames
+    /// that carry text input and everything else on the periodic sweep.
+    /// Decision points (close, save-all, discard-all, project switch) call
+    /// `sync_all_edit_snapshots` directly instead of trusting the sweep.
+    pub(crate) fn sync_edit_snapshots(&mut self, context: &egui::Context) {
+        let now = Instant::now();
+        if self
+            .last_edit_sweep
+            .is_none_or(|last| now.duration_since(last) >= Self::EDIT_SWEEP_INTERVAL)
+        {
+            self.last_edit_sweep = Some(now);
+            self.sync_all_edit_snapshots(now);
+            return;
+        }
+        let typed = context.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Key { .. }
+                        | egui::Event::Text(_)
+                        | egui::Event::Paste(_)
+                        | egui::Event::Ime(_)
+                )
+            })
+        });
+        if !typed {
+            return;
+        }
+        match self.navigation {
+            Navigation::Api => {
+                if let Some(request) = self.requests.get_mut(self.selected) {
+                    request.sync_edit_revision(now);
+                }
+            }
+            Navigation::Environment => {
+                if let Some(environment) = self.environments.get_mut(self.selected_environment) {
+                    environment.sync_edit_revision(now);
+                }
+            }
+            Navigation::Scenario | Navigation::Mock | Navigation::History => {}
+        }
+    }
+
+    pub(crate) fn sync_all_edit_snapshots(&mut self, now: Instant) {
+        for request in &mut self.requests {
+            request.sync_edit_revision(now);
+        }
+        for environment in &mut self.environments {
+            environment.sync_edit_revision(now);
+        }
+    }
+
+    /// Refresh only the selected document's snapshot, before a decision that
+    /// reads `current_dirty`.
+    pub(crate) fn sync_current_edit_snapshot(&mut self) {
+        let now = Instant::now();
+        match self.navigation {
+            Navigation::Api => {
+                if let Some(request) = self.requests.get_mut(self.selected) {
+                    request.sync_edit_revision(now);
+                }
+            }
+            Navigation::Environment => {
+                if let Some(environment) = self.environments.get_mut(self.selected_environment) {
+                    environment.sync_edit_revision(now);
+                }
+            }
+            // Scenario and mock dirtiness is computed live from the document.
+            Navigation::Scenario | Navigation::Mock | Navigation::History => {}
+        }
+    }
+
     pub(crate) fn schedule_request_autosaves(&mut self, context: &egui::Context) {
         if self.storage_worker.is_none() {
             return;
         }
         let now = Instant::now();
-        for request in &mut self.requests {
-            request.sync_edit_revision(now);
-        }
         let due = self
             .requests
             .iter()
@@ -306,9 +387,6 @@ impl ApiTestApp {
             return;
         }
         let now = Instant::now();
-        for environment in &mut self.environments {
-            environment.sync_edit_revision(now);
-        }
         let due = self
             .environments
             .iter()

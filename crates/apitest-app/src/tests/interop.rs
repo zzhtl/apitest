@@ -429,7 +429,7 @@ fn search_finds_requests_that_are_not_loaded_in_memory() {
             .any(|request| request.id() == stored_id)
     );
 
-    let hits = harness.state().search_hits("订单");
+    let (hits, _) = harness.state().search_hits("订单");
     assert!(
         hits.iter().any(|hit| hit.id == stored_id),
         "full-text search should surface the stored definition, got {:?}",

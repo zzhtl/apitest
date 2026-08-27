@@ -202,6 +202,9 @@ impl ApiTestApp {
     }
 
     pub(crate) fn discard_workspace(&mut self) -> bool {
+        // The per-document discard below only touches documents whose dirty
+        // flag is set, so every snapshot must be current first.
+        self.sync_all_edit_snapshots(std::time::Instant::now());
         let protected = self
             .environments
             .iter()

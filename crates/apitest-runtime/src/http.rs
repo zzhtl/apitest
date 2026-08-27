@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::Arc,
-    time::{Duration, Instant},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime},
 };
 
 use apitest_core::{
@@ -33,14 +34,118 @@ use url::Url;
 pub struct HttpExecutor {
     secrets: Arc<dyn SecretStore>,
     cookies: Arc<Jar>,
+    /// Built clients keyed by their connection-affecting settings, so repeated
+    /// sends reuse the pool (keep-alive, HTTP/2) instead of a fresh TLS setup.
+    clients: Arc<Mutex<HashMap<ClientKey, Client>>>,
 }
+
+/// The subset of a request that forces a distinct `reqwest::Client`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ClientKey {
+    follow_redirects: bool,
+    validate_tls: bool,
+    /// Resolved proxy URL plus username and password digest.
+    proxy: Option<(String, Option<(String, String)>)>,
+    /// Client certificate path with mtime and size, so edits invalidate.
+    certificate: Option<(PathBuf, Option<SystemTime>, u64)>,
+}
+
+/// A handful of distinct proxy/TLS combinations at most; beyond that the
+/// workspace is churning through settings and old pools are worthless.
+const CLIENT_CACHE_LIMIT: usize = 8;
 
 impl HttpExecutor {
     pub fn new(secrets: Arc<dyn SecretStore>) -> Self {
         Self {
             secrets,
             cookies: Arc::new(Jar::default()),
+            clients: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    async fn client_for(
+        &self,
+        spec: &HttpSpec,
+        environment: &Environment,
+        local_variables: &[Variable],
+    ) -> Result<Client, ExecutionError> {
+        // Resolve the client-affecting inputs once; they double as the key.
+        let proxy = match &spec.proxy {
+            Some(proxy) => {
+                let url = resolve_required(environment, local_variables, &proxy.url, "proxy URL")?;
+                let auth = match &proxy.username {
+                    Some(username) => {
+                        let username = resolve_required(
+                            environment,
+                            local_variables,
+                            username,
+                            "proxy username",
+                        )?;
+                        let password = proxy
+                            .password
+                            .as_ref()
+                            .map(|reference| secret_value(reference, &*self.secrets))
+                            .transpose()?
+                            .unwrap_or_default();
+                        Some((username, password))
+                    }
+                    None => None,
+                };
+                Some((url, auth))
+            }
+            None => None,
+        };
+        let certificate = match &spec.client_certificate {
+            Some(certificate) => {
+                let metadata =
+                    tokio::fs::metadata(&certificate.pem_file)
+                        .await
+                        .map_err(|error| {
+                            ExecutionError::InvalidRequest(format!(
+                                "failed to read client certificate `{}`: {error}",
+                                certificate.pem_file.display()
+                            ))
+                        })?;
+                Some((
+                    certificate.pem_file.clone(),
+                    metadata.modified().ok(),
+                    metadata.len(),
+                ))
+            }
+            None => None,
+        };
+        let key = ClientKey {
+            follow_redirects: spec.follow_redirects,
+            validate_tls: spec.validate_tls,
+            // The key must not hold the plaintext proxy password.
+            proxy: proxy.as_ref().map(|(url, auth)| {
+                (
+                    url.clone(),
+                    auth.as_ref().map(|(username, password)| {
+                        (username.clone(), sha256_hex(password.as_bytes()))
+                    }),
+                )
+            }),
+            certificate,
+        };
+        if let Some(client) = self
+            .clients
+            .lock()
+            .expect("client cache lock should not be poisoned")
+            .get(&key)
+        {
+            return Ok(client.clone());
+        }
+        let client = build_client(spec, proxy, Arc::clone(&self.cookies)).await?;
+        let mut clients = self
+            .clients
+            .lock()
+            .expect("client cache lock should not be poisoned");
+        if clients.len() >= CLIENT_CACHE_LIMIT {
+            clients.clear();
+        }
+        clients.insert(key, client.clone());
+        Ok(client)
     }
 
     fn materialize_variables(
@@ -103,12 +208,14 @@ impl ProtocolExecutor for HttpExecutor {
                 &request.local_variables,
             )?;
             let (spec, is_sse) = normalize_protocol(request.protocol)?;
+            let client = executor.client_for(&spec, &environment, &local_variables).await?;
             let prepared = PreparedRequest::new(
                 &spec,
                 &environment,
                 &local_variables,
                 &*executor.secrets,
                 Arc::clone(&executor.cookies),
+                client,
             ).await?;
             let sent_bytes = prepared.sent_bytes;
             let response = tokio::select! {
@@ -209,6 +316,7 @@ impl PreparedRequest {
         local_variables: &[Variable],
         secrets: &dyn SecretStore,
         cookies: Arc<Jar>,
+        client: Client,
     ) -> Result<Self, ExecutionError> {
         let url = resolve_required(environment, local_variables, &spec.url, "URL")?;
         let mut url = Url::parse(&url)
@@ -223,15 +331,6 @@ impl PreparedRequest {
                 query.append_pair(&name, &value);
             }
         }
-        let client = build_client(
-            spec,
-            environment,
-            local_variables,
-            secrets,
-            Arc::clone(&cookies),
-        )
-        .await?;
-
         let method = Method::from_bytes(spec.method.to_string().as_bytes())
             .map_err(|error| ExecutionError::InvalidRequest(error.to_string()))?;
         let mut builder = client
@@ -463,9 +562,7 @@ impl PreparedRequest {
 
 async fn build_client(
     spec: &HttpSpec,
-    environment: &Environment,
-    local_variables: &[Variable],
-    secrets: &dyn SecretStore,
+    proxy: Option<(String, Option<(String, String)>)>,
     cookies: Arc<Jar>,
 ) -> Result<Client, ExecutionError> {
     let mut builder = Client::builder()
@@ -476,19 +573,10 @@ async fn build_client(
         })
         .danger_accept_invalid_certs(!spec.validate_tls)
         .cookie_provider(cookies);
-    if let Some(proxy) = &spec.proxy {
-        let url = resolve_required(environment, local_variables, &proxy.url, "proxy URL")?;
+    if let Some((url, auth)) = proxy {
         let mut configured = Proxy::all(&url)
             .map_err(|error| ExecutionError::InvalidRequest(format!("invalid proxy: {error}")))?;
-        if let Some(username) = &proxy.username {
-            let username =
-                resolve_required(environment, local_variables, username, "proxy username")?;
-            let password = proxy
-                .password
-                .as_ref()
-                .map(|reference| secret_value(reference, secrets))
-                .transpose()?
-                .unwrap_or_default();
+        if let Some((username, password)) = auth {
             configured = configured.basic_auth(&username, &password);
         }
         builder = builder.proxy(configured);
@@ -1102,5 +1190,51 @@ fn map_reqwest_error(error: reqwest::Error, timeout_ms: u64) -> ExecutionError {
         ExecutionError::InvalidRequest(error.to_string())
     } else {
         ExecutionError::Network(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apitest_core::HttpMethod;
+    use apitest_storage::MemorySecretStore;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn client_cache_reuses_matching_configurations_and_splits_on_changes() {
+        let executor = HttpExecutor::new(Arc::new(MemorySecretStore::default()));
+        let environment = Environment::new("test");
+        let spec = HttpSpec::new(HttpMethod::Get, "http://localhost/");
+
+        for _ in 0..2 {
+            executor
+                .client_for(&spec, &environment, &[])
+                .await
+                .expect("client should build");
+        }
+        let cached = |executor: &HttpExecutor| {
+            executor
+                .clients
+                .lock()
+                .expect("client cache lock should not be poisoned")
+                .len()
+        };
+        assert_eq!(cached(&executor), 1);
+
+        let mut insecure = spec.clone();
+        insecure.validate_tls = !spec.validate_tls;
+        executor
+            .client_for(&insecure, &environment, &[])
+            .await
+            .expect("client should build");
+        assert_eq!(cached(&executor), 2);
+
+        let mut pinned = spec.clone();
+        pinned.follow_redirects = !spec.follow_redirects;
+        executor
+            .client_for(&pinned, &environment, &[])
+            .await
+            .expect("client should build");
+        assert_eq!(cached(&executor), 3);
     }
 }

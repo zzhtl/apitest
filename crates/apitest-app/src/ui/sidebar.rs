@@ -128,7 +128,16 @@ impl ApiTestApp {
                             }
                         }
                     } else {
-                        let hits = self.search_hits(&search);
+                        let (hits, index_error) = self.cached_search_hits(&search);
+                        if index_error {
+                            ui.colored_label(
+                                palette.warning,
+                                self.tr(
+                                    "搜索索引不可用，结果可能不完整",
+                                    "Search index unavailable; results may be incomplete",
+                                ),
+                            );
+                        }
                         if hits.is_empty() {
                             empty_state(
                                 ui,

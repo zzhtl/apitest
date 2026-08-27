@@ -40,18 +40,19 @@ impl ApiTestApp {
     }
 
     /// Requests matching `query`, from the full-text index plus anything only
-    /// held in memory.
+    /// held in memory, and whether the index failed (results incomplete).
     ///
     /// The sidebar used to filter the loaded page in memory, so a project with
     /// more requests than one page could not find the rest.
-    pub(crate) fn search_hits(&self, query: &str) -> Vec<SearchHit> {
+    pub(crate) fn search_hits(&self, query: &str) -> (Vec<SearchHit>, bool) {
         const SEARCH_LIMIT: usize = 50;
         let query = query.trim();
         if query.is_empty() {
-            return Vec::new();
+            return (Vec::new(), false);
         }
         let mut hits = Vec::new();
         let mut seen = HashSet::new();
+        let mut index_error = false;
         if let Some(database) = &self.database {
             match database.search_definitions(self.project.id, query, SEARCH_LIMIT) {
                 Ok(summaries) => {
@@ -64,7 +65,10 @@ impl ApiTestApp {
                         }
                     }
                 }
-                Err(error) => tracing::warn!(%error, "full-text search failed"),
+                Err(error) => {
+                    tracing::warn!(%error, "full-text search failed");
+                    index_error = true;
+                }
             }
         }
         // Unsaved edits are not in the index yet, so match them here too.
@@ -82,7 +86,30 @@ impl ApiTestApp {
                 });
             }
         }
-        hits
+        (hits, index_error)
+    }
+
+    /// `search_hits` behind a cache, so typing-frame redraws do not run one
+    /// SQLite FTS query per frame. Invalidated when a save, delete, import or
+    /// project switch changes what the index would return.
+    pub(crate) fn cached_search_hits(&mut self, query: &str) -> (Vec<SearchHit>, bool) {
+        if self.search_cache.stale || self.search_cache.query != query {
+            let (hits, index_error) = self.search_hits(query);
+            self.search_cache = SearchCache {
+                query: query.to_owned(),
+                hits,
+                index_error,
+                stale: false,
+            };
+        }
+        (
+            self.search_cache.hits.clone(),
+            self.search_cache.index_error,
+        )
+    }
+
+    pub(crate) fn invalidate_search_cache(&mut self) {
+        self.search_cache.stale = true;
     }
 
     pub(crate) fn tr<'a>(&self, chinese: &'a str, english: &'a str) -> &'a str {
@@ -218,6 +245,41 @@ impl ApiTestApp {
         }
     }
 
+    /// `workspace_dirty` after refreshing every snapshot, for decisions where
+    /// a one-sweep-tick stale answer could lose data (close, project switch).
+    pub(crate) fn workspace_dirty_strict(&mut self) -> bool {
+        self.sync_all_edit_snapshots(std::time::Instant::now());
+        self.workspace_dirty()
+    }
+
+    /// `document_dirty` after refreshing that document's snapshot.
+    pub(crate) fn document_dirty_strict(&mut self, id: DocumentId) -> bool {
+        let now = std::time::Instant::now();
+        match id.kind {
+            DocumentKind::Api => {
+                if let Some(request) = self
+                    .requests
+                    .iter_mut()
+                    .find(|request| request.id() == id.entity_id)
+                {
+                    request.sync_edit_revision(now);
+                }
+            }
+            DocumentKind::Environment => {
+                if let Some(environment) = self
+                    .environments
+                    .iter_mut()
+                    .find(|environment| environment.id() == id.entity_id)
+                {
+                    environment.sync_edit_revision(now);
+                }
+            }
+            // Scenario and mock dirtiness is computed live from the document.
+            DocumentKind::Scenario | DocumentKind::Mock | DocumentKind::History => {}
+        }
+        self.document_dirty(id)
+    }
+
     pub(crate) fn workspace_dirty(&self) -> bool {
         self.requests.iter().any(WorkspaceRequest::is_dirty)
             || self.environments.iter().any(EnvironmentDraft::is_dirty)
@@ -273,7 +335,17 @@ pub(crate) fn document_snapshot(value: &impl Serialize) -> Vec<u8> {
 }
 
 /// One row of the request search results.
+#[derive(Clone)]
 pub(crate) struct SearchHit {
     pub(crate) id: EntityId,
     pub(crate) name: String,
+}
+
+/// Last search result, keyed by the query that produced it.
+#[derive(Default)]
+pub(crate) struct SearchCache {
+    query: String,
+    hits: Vec<SearchHit>,
+    index_error: bool,
+    stale: bool,
 }

@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -42,7 +42,9 @@ impl BodyStore {
             .map_err(|error| StorageError::io(&temporary_path, error))?;
 
         Ok(BodySink {
-            file: Some(file),
+            // Buffered: the redacting writer above emits many tiny spans and the
+            // sink runs on the UI thread — one syscall per span is unaffordable.
+            file: Some(BufWriter::with_capacity(64 * 1024, file)),
             temporary_path,
             final_path,
             size: 0,
@@ -102,7 +104,7 @@ impl BodyStore {
 }
 
 pub struct BodySink {
-    file: Option<File>,
+    file: Option<BufWriter<File>>,
     temporary_path: PathBuf,
     final_path: PathBuf,
     size: u64,
@@ -115,9 +117,10 @@ impl BodySink {
     }
 
     pub fn commit(mut self) -> Result<BodyRef, StorageError> {
-        if let Some(mut file) = self.file.take() {
-            file.flush()
-                .map_err(|error| StorageError::io(&self.temporary_path, error))?;
+        if let Some(writer) = self.file.take() {
+            let file = writer
+                .into_inner()
+                .map_err(|error| StorageError::io(&self.temporary_path, error.into_error()))?;
             file.sync_data()
                 .map_err(|error| StorageError::io(&self.temporary_path, error))?;
         }
@@ -190,24 +193,34 @@ impl RedactingBodySink {
                 .len()
                 .saturating_sub(self.max_secret_len.saturating_sub(1))
         };
-        let mut cursor = 0;
         let sink = self
             .sink
             .as_mut()
             .ok_or_else(|| std::io::Error::other("body sink is already committed"))?;
+        // Nothing to redact: forward the whole safe slice in one write.
+        if self.secrets.is_empty() {
+            sink.write_all(&self.pending[..safe_end])?;
+            self.pending.drain(..safe_end);
+            return Ok(());
+        }
+        // Batch the clean spans between matches instead of writing per byte.
+        let mut cursor = 0;
+        let mut clean_start = 0;
         while cursor < safe_end {
             if let Some(secret) = self
                 .secrets
                 .iter()
                 .find(|secret| self.pending[cursor..].starts_with(secret))
             {
+                sink.write_all(&self.pending[clean_start..cursor])?;
                 sink.write_all(REDACTED)?;
                 cursor += secret.len();
+                clean_start = cursor;
             } else {
-                sink.write_all(&self.pending[cursor..cursor + 1])?;
                 cursor += 1;
             }
         }
+        sink.write_all(&self.pending[clean_start..cursor])?;
         self.pending.drain(..cursor);
         Ok(())
     }

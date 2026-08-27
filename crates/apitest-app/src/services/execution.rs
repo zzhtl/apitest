@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use apitest_core::{
     ExecutionCommand, ExecutionError, ExecutionEvent, ExecutionRequest, ProtocolSpec, ResponseHead,
     RunState as HistoryRunState,
@@ -203,7 +205,9 @@ impl ApiTestApp {
                 if sender.send(RuntimeMessage::Event(run, event)).is_err() {
                     return;
                 }
-                context.request_repaint();
+                // Coalesce to ~30 fps: repainting per streamed chunk pinned the
+                // UI at full frame rate exactly while rendering is costliest.
+                context.request_repaint_after(Duration::from_millis(33));
             }
             let _ = sender.send(RuntimeMessage::Closed(run));
             context.request_repaint();

@@ -62,6 +62,9 @@ pub(crate) struct WorkspaceRequest {
     pub(crate) sync_contract: bool,
     pub(crate) autosave: AutoSaveState,
     pub(crate) observed_snapshot: Vec<u8>,
+    /// Snapshot of the last persisted state; `is_dirty` compares it against
+    /// `observed_snapshot` so the per-frame check never clones the protocol.
+    pub(crate) persisted_snapshot: Vec<u8>,
 }
 
 impl WorkspaceRequest {
@@ -96,6 +99,7 @@ impl WorkspaceRequest {
             persisted: false,
             sync_contract: true,
             autosave,
+            persisted_snapshot: observed_snapshot.clone(),
             observed_snapshot,
         }
     }
@@ -126,6 +130,7 @@ impl WorkspaceRequest {
             persisted,
             sync_contract: false,
             autosave,
+            persisted_snapshot: observed_snapshot.clone(),
             observed_snapshot,
         }
     }
@@ -134,10 +139,13 @@ impl WorkspaceRequest {
         self.definition.id
     }
 
+    /// Cheap enough for per-frame use: compares the cached snapshots instead
+    /// of cloning the whole protocol. `observed_snapshot` may lag the draft by
+    /// one edit-sweep tick; decision points go through the strict variants.
     pub(crate) fn is_dirty(&self) -> bool {
         !self.persisted
             || self.name != self.definition.name
-            || self.edited_protocol() != self.request_case.protocol
+            || self.observed_snapshot != self.persisted_snapshot
             || self.draft.has_pending_secret()
             || self.autosave.is_dirty()
     }
@@ -156,6 +164,7 @@ impl WorkspaceRequest {
         }
         self.autosave = AutoSaveState::new(Duration::from_millis(500));
         self.observed_snapshot = request_snapshot(&self.name, self.edited_protocol());
+        self.persisted_snapshot = self.observed_snapshot.clone();
     }
 
     pub(crate) fn sync_edit_revision(&mut self, now: Instant) {
@@ -210,6 +219,7 @@ impl WorkspaceRequest {
         request_case: RequestCase,
         revision: u64,
     ) {
+        self.persisted_snapshot = request_snapshot(&definition.name, request_case.protocol.clone());
         self.definition = definition;
         self.request_case = request_case;
         self.persisted = true;

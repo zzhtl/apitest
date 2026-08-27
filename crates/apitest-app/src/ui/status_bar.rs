@@ -24,7 +24,15 @@ impl ApiTestApp {
         let response = &self.session().response;
         let run = match response.state {
             RunState::Idle => None,
-            RunState::Running => Some((self.tr("请求中…", "Running…").to_owned(), Tone::Info)),
+            RunState::Running => Some((
+                format!(
+                    "{}  {} ms · ↓ {}",
+                    self.tr("请求中…", "Running…"),
+                    response.elapsed_ms(),
+                    format_bytes(response.streamed_bytes)
+                ),
+                Tone::Info,
+            )),
             RunState::Cancelling => {
                 Some((self.tr("取消中…", "Cancelling…").to_owned(), Tone::Warning))
             }

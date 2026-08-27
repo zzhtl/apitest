@@ -41,6 +41,8 @@ impl ApiTestApp {
                         request.mark_saved(definition, request_case, revision);
                         renamed = Some((request.id(), request.name.clone()));
                     }
+                    // The FTS index just changed under the cached results.
+                    self.invalidate_search_cache();
                     if let Some((id, name)) = renamed {
                         self.document_tabs.rename(
                             DocumentId {

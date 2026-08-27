@@ -270,5 +270,7 @@ pub(super) fn test_app(context: &mut eframe::CreationContext<'_>) -> ApiTestApp 
         openapi_html: String::new(),
         openapi_issues: Vec::new(),
         allow_close: false,
+        last_edit_sweep: None,
+        search_cache: Default::default(),
     }
 }

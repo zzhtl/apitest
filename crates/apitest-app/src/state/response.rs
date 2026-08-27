@@ -62,6 +62,8 @@ pub(crate) struct ResponseView {
     pub(crate) started_at: Option<Instant>,
     pub(crate) timeline: Vec<TimelineEntry>,
     pub(crate) saw_first_byte: bool,
+    /// Total bytes received so far, past the preview cap, for live progress.
+    pub(crate) streamed_bytes: u64,
 }
 
 impl Default for ResponseView {
@@ -81,6 +83,7 @@ impl Default for ResponseView {
             started_at: None,
             timeline: Vec::new(),
             saw_first_byte: false,
+            streamed_bytes: 0,
         }
     }
 }
@@ -119,6 +122,7 @@ impl ResponseView {
     }
 
     pub(crate) fn append_body(&mut self, bytes: &[u8]) {
+        self.streamed_bytes = self.streamed_bytes.saturating_add(bytes.len() as u64);
         if self.preview_bytes >= MAX_RESPONSE_BYTES {
             self.truncated = true;
             return;
